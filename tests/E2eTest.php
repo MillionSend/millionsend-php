@@ -38,7 +38,7 @@ it('creates, reads, updates and deletes a contact in an audience', function () {
     } finally {
         $ms->audiences->remove($audienceId);
     }
-})->skip($skip, 'Set MILLIONSEND_API_KEY to run the e2e suite.');
+})->group('e2e')->skip($skip, 'Set MILLIONSEND_API_KEY to run the e2e suite.');
 
 it('throws a not_found ErrorException for a missing contact', function () {
     $ms = MillionSend::client();
@@ -49,4 +49,4 @@ it('throws a not_found ErrorException for a missing contact', function () {
     } catch (ErrorException $e) {
         expect($e->getErrorName())->toBe('not_found');
     }
-})->skip($skip, 'Set MILLIONSEND_API_KEY to run the e2e suite.');
+})->group('e2e')->skip($skip, 'Set MILLIONSEND_API_KEY to run the e2e suite.');
