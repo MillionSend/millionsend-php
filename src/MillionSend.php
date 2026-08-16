@@ -1,18 +1,50 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MillionSend;
 
+use GuzzleHttp\ClientInterface;
+
 /**
- * MillionSend PHP SDK — under active development.
- * This placeholder release reserves the package name.
- * Follow https://github.com/MillionSend for the first working release.
+ * Static factory for the MillionSend {@see Client}.
+ *
+ * ```php
+ * use MillionSend\MillionSend;
+ *
+ * $ms = MillionSend::client('ms_123', 'https://mail.acme.dev');
+ * $sent = $ms->emails->send([
+ *     'from' => 'Acme <onboarding@acme.dev>',
+ *     'to' => 'delivered@resend.dev',
+ *     'subject' => 'Hello',
+ *     'html' => '<strong>it works</strong>',
+ * ]);
+ * ```
  */
 final class MillionSend
 {
-    public function __construct(?string $apiKey = null)
+    /**
+     * @param string|null $apiKey  Falls back to env MILLIONSEND_API_KEY. Missing → throws.
+     * @param string|null $baseUrl Falls back to env MILLIONSEND_BASE_URL, then http://localhost:3001.
+     * @param array{client?: ClientInterface, userAgent?: string} $options
+     *        `client` injects a Guzzle client (tests, proxies); `userAgent` appends a suffix.
+     */
+    public static function client(?string $apiKey = null, ?string $baseUrl = null, array $options = []): Client
     {
-        throw new \RuntimeException(
-            'The MillionSend SDK is under active development — this placeholder only reserves the package name.'
+        $key = $apiKey ?? (getenv('MILLIONSEND_API_KEY') ?: null);
+        if ($key === null || $key === '') {
+            throw new \InvalidArgumentException(
+                'Missing API key. Pass it to MillionSend::client($apiKey) or set MILLIONSEND_API_KEY.'
+            );
+        }
+
+        $http = new HttpClient(
+            $key,
+            $baseUrl,
+            $options['client'] ?? null,
+            $options['userAgent'] ?? null,
         );
+
+        return new Client($http);
     }
 }

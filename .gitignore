@@ -1,6 +1,6 @@
+/vendor/
+composer.lock
+.phpunit.result.cache
+.phpunit.cache/
+/.pest/
 .DS_Store
-vendor/
-target/
-*.gem
-Gemfile.lock
-Cargo.lock
