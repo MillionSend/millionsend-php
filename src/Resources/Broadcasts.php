@@ -11,7 +11,6 @@ final class Broadcasts
 {
     private const WIRE_MAP = [
         'name' => 'name',
-        'audienceId' => 'audience_id',
         'segmentId' => 'segment_id',
         'from' => 'from',
         'subject' => 'subject',

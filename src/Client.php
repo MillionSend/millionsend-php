@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MillionSend;
 
-use MillionSend\Resources\Audiences;
 use MillionSend\Resources\Batch;
 use MillionSend\Resources\Broadcasts;
 use MillionSend\Resources\Contacts;
@@ -20,7 +19,6 @@ final class Client
 {
     public readonly Emails $emails;
     public readonly Batch $batch;
-    public readonly Audiences $audiences;
     public readonly Contacts $contacts;
     public readonly Topics $topics;
     public readonly Broadcasts $broadcasts;
@@ -30,7 +28,6 @@ final class Client
     {
         $this->emails = new Emails($http);
         $this->batch = new Batch($http);
-        $this->audiences = new Audiences($http);
         $this->contacts = new Contacts($http);
         $this->topics = new Topics($http);
         $this->broadcasts = new Broadcasts($http);

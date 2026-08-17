@@ -35,41 +35,17 @@ describe('batch', function () {
     });
 });
 
-describe('audiences', function () {
-    it('covers create/get/list/remove', function () {
-        [$ms, $spy] = fakeClient();
-
-        $ms->audiences->create(['name' => 'Users']);
-        expect($spy->at(0)->getMethod())->toBe('POST');
-        expect($spy->at(0)->getUri()->getPath())->toBe('/audiences');
-        expect(bodyOf($spy->at(0)))->toEqual(['name' => 'Users']);
-
-        $ms->audiences->get('a1');
-        expect($spy->at(1)->getUri()->getPath())->toBe('/audiences/a1');
-
-        $ms->audiences->list(['limit' => 10]);
-        expect($spy->at(2)->getUri()->getPath())->toBe('/audiences');
-        expect($spy->at(2)->getUri()->getQuery())->toBe('limit=10');
-
-        $ms->audiences->remove('a1');
-        expect($spy->at(3)->getMethod())->toBe('DELETE');
-        expect($spy->at(3)->getUri()->getPath())->toBe('/audiences/a1');
-    });
-});
-
 describe('contacts', function () {
-    it('creates audience-scoped and top-level', function () {
+    it('creates at the top-level /contacts', function () {
         [$ms, $spy] = fakeClient();
 
-        $ms->contacts->create(['audienceId' => 'a1', 'email' => 'c@x.dev', 'firstName' => 'Ada']);
-        expect($spy->at(0)->getUri()->getPath())->toBe('/audiences/a1/contacts');
+        $ms->contacts->create(['email' => 'c@x.dev', 'firstName' => 'Ada']);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts');
         expect(bodyOf($spy->at(0)))->toEqual(['email' => 'c@x.dev', 'first_name' => 'Ada']);
-
-        $ms->contacts->create(['email' => 'c@x.dev']);
-        expect($spy->at(1)->getUri()->getPath())->toBe('/contacts');
     });
 
-    it('addresses by string id, email, and scoped id', function () {
+    it('addresses by string id and by email (email wins)', function () {
         [$ms, $spy] = fakeClient();
 
         $ms->contacts->get('c1');
@@ -78,8 +54,8 @@ describe('contacts', function () {
         $ms->contacts->get(['email' => 'c@x.dev']);
         expect($spy->at(1)->getUri()->getPath())->toBe('/contacts/' . rawurlencode('c@x.dev'));
 
-        $ms->contacts->get(['audienceId' => 'a1', 'id' => 'c1']);
-        expect($spy->at(2)->getUri()->getPath())->toBe('/audiences/a1/contacts/c1');
+        $ms->contacts->get(['id' => 'c1', 'email' => 'c@x.dev']);
+        expect($spy->at(2)->getUri()->getPath())->toBe('/contacts/' . rawurlencode('c@x.dev'));
     });
 
     it('update sends only provided keys (null clears)', function () {
@@ -97,8 +73,8 @@ describe('contacts', function () {
         $ms->contacts->remove(['email' => 'c@x.dev']);
         expect($spy->at(0)->getMethod())->toBe('DELETE');
 
-        $ms->contacts->list(['audienceId' => 'a1', 'after' => 'cur']);
-        expect($spy->at(1)->getUri()->getPath())->toBe('/audiences/a1/contacts');
+        $ms->contacts->list(['after' => 'cur']);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/contacts');
         expect($spy->at(1)->getUri()->getQuery())->toBe('after=cur');
     });
 
@@ -129,10 +105,10 @@ describe('broadcasts', function () {
     it('covers the full lifecycle', function () {
         [$ms, $spy] = fakeClient();
 
-        $ms->broadcasts->create(['audienceId' => 'a1', 'from' => 'a@x.dev', 'subject' => 'News', 'html' => '<p>hi</p>']);
+        $ms->broadcasts->create(['segmentId' => 's1', 'from' => 'a@x.dev', 'subject' => 'News', 'html' => '<p>hi</p>']);
         expect($spy->at(0)->getUri()->getPath())->toBe('/broadcasts');
         expect(bodyOf($spy->at(0)))->toEqual([
-            'audience_id' => 'a1',
+            'segment_id' => 's1',
             'from' => 'a@x.dev',
             'subject' => 'News',
             'html' => '<p>hi</p>',
@@ -186,24 +162,24 @@ describe('topics', function () {
 });
 
 describe('segments', function () {
-    it('covers create/get/list/update/remove on /segments2', function () {
+    it('covers create/get/list/update/remove on /segments', function () {
         [$ms, $spy] = fakeClient();
         $filter = ['match' => 'all', 'conditions' => [['field' => 'email', 'op' => 'is_set']]];
 
-        $ms->segments->create(['name' => 'Active', 'audienceId' => 'a1', 'filter' => $filter]);
-        expect($spy->at(0)->getUri()->getPath())->toBe('/segments2');
-        expect(bodyOf($spy->at(0)))->toEqual(['name' => 'Active', 'audience_id' => 'a1', 'filter' => $filter]);
+        $ms->segments->create(['name' => 'Active', 'filter' => $filter]);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/segments');
+        expect(bodyOf($spy->at(0)))->toEqual(['name' => 'Active', 'filter' => $filter]);
 
         $ms->segments->get('s1');
-        expect($spy->at(1)->getUri()->getPath())->toBe('/segments2/s1');
+        expect($spy->at(1)->getUri()->getPath())->toBe('/segments/s1');
 
         $ms->segments->list(['before' => 'cur']);
-        expect($spy->at(2)->getUri()->getPath())->toBe('/segments2');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/segments');
         expect($spy->at(2)->getUri()->getQuery())->toBe('before=cur');
 
         $ms->segments->update('s1', ['name' => 'Renamed']);
         expect($spy->at(3)->getMethod())->toBe('PATCH');
-        expect($spy->at(3)->getUri()->getPath())->toBe('/segments2/s1');
+        expect($spy->at(3)->getUri()->getPath())->toBe('/segments/s1');
 
         $ms->segments->remove('s1');
         expect($spy->at(4)->getMethod())->toBe('DELETE');

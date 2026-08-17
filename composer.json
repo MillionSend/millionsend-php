@@ -5,7 +5,7 @@
     "keywords": ["email", "millionsend", "ses", "transactional-email", "resend-compatible"],
     "license": "MIT",
     "homepage": "https://github.com/MillionSend/millionsend-php",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "support": {
         "issues": "https://github.com/MillionSend/millionsend-php/issues",
         "source": "https://github.com/MillionSend/millionsend-php"

@@ -8,8 +8,8 @@ use MillionSend\HttpClient;
 use MillionSend\Util;
 
 /**
- * Contacts — addressable by id OR email (email wins when both are present), and
- * either audience-scoped (pass `audienceId`) or top-level.
+ * Contacts — team-global (one record per email, case-insensitive), addressable
+ * by id OR email (email wins when both are present).
  */
 final class Contacts
 {
@@ -36,16 +36,14 @@ final class Contacts
     }
 
     /**
-     * @param array{audienceId?: string, email: string, firstName?: string, lastName?: string, unsubscribed?: bool, properties?: array<string,mixed>} $params
+     * POST /contacts — 409 validation_error when the email already exists on the team.
+     *
+     * @param array{email: string, firstName?: string, lastName?: string, unsubscribed?: bool, properties?: array<string,mixed>} $params
      * @return array<mixed>
      */
     public function create(array $params): array
     {
-        $path = isset($params['audienceId'])
-            ? '/audiences/' . rawurlencode((string) $params['audienceId']) . '/contacts'
-            : '/contacts';
-
-        return $this->http->request('POST', $path, Util::pick($params, self::CREATE_MAP) ?: new \stdClass());
+        return $this->http->request('POST', '/contacts', Util::pick($params, self::CREATE_MAP) ?: new \stdClass());
     }
 
     /** @param string|array<string,mixed> $contact @return array<mixed> */
@@ -57,7 +55,7 @@ final class Contacts
     /**
      * PATCH — a null value clears a field; omit a key to leave it unchanged.
      *
-     * @param array{id?: string, email?: string, audienceId?: string, firstName?: string|null, lastName?: string|null, unsubscribed?: bool, properties?: array<string,mixed>} $params
+     * @param array{id?: string, email?: string, firstName?: string|null, lastName?: string|null, unsubscribed?: bool, properties?: array<string,mixed>} $params
      * @return array<mixed>
      */
     public function update(array $params): array
@@ -71,14 +69,10 @@ final class Contacts
         return $this->http->request('DELETE', self::path(self::normalize($contact)));
     }
 
-    /** @param array{audienceId?: string, limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
     public function list(array $options = []): array
     {
-        $path = isset($options['audienceId'])
-            ? '/audiences/' . rawurlencode((string) $options['audienceId']) . '/contacts'
-            : '/contacts';
-
-        return $this->http->request('GET', $path, null, Util::listQuery($options));
+        return $this->http->request('GET', '/contacts', null, Util::listQuery($options));
     }
 
     /**
@@ -101,13 +95,9 @@ final class Contacts
         return is_string($contact) ? ['id' => $contact] : $contact;
     }
 
-    /** Email wins over id; audience-scoped when audienceId is set. @param array<string,mixed> $addr */
+    /** Email wins over id. @param array<string,mixed> $addr */
     private static function path(array $addr): string
     {
-        $key = rawurlencode((string) ($addr['email'] ?? $addr['id'] ?? ''));
-
-        return isset($addr['audienceId'])
-            ? '/audiences/' . rawurlencode((string) $addr['audienceId']) . "/contacts/{$key}"
-            : "/contacts/{$key}";
+        return '/contacts/' . rawurlencode((string) ($addr['email'] ?? $addr['id'] ?? ''));
     }
 }

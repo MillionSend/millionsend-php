@@ -97,25 +97,22 @@ $ms->emails->send([
 ]);
 ```
 
-### Audiences & contacts
+### Contacts
+
+Contacts are team-global: one record per email address, shared by every
+broadcast and segment.
 
 ```php
-$audience = $ms->audiences->create(['name' => 'Registered users']);
-$ms->audiences->list(['limit' => 20, 'after' => $cursor]);
-$ms->audiences->get($id);
-$ms->audiences->remove($id);
-
 $ms->contacts->create([
-    'audienceId' => $audienceId,
     'email' => 'ada@acme.dev',
     'firstName' => 'Ada',
     'properties' => ['plan' => 'pro'],
 ]);
-$ms->contacts->get(['audienceId' => $audienceId, 'email' => 'ada@acme.dev']); // by id or email (email wins)
-$ms->contacts->get($contactId);                                               // a bare string id works too
+$ms->contacts->get(['email' => 'ada@acme.dev']);  // by id or email (email wins)
+$ms->contacts->get($contactId);                   // a bare string id works too
 $ms->contacts->update(['id' => $contactId, 'unsubscribed' => true, 'firstName' => null]); // null clears
 $ms->contacts->remove(['email' => 'ada@acme.dev']);
-$ms->contacts->list(['audienceId' => $audienceId, 'limit' => 50]);
+$ms->contacts->list(['limit' => 50]);
 
 // Topic subscriptions (granular unsubscribe)
 $ms->contacts->topics->update([
@@ -136,12 +133,15 @@ $ms->topics->remove($id);
 
 ### Broadcasts
 
+Targeting is an optional `segmentId` and/or `topicId` — omit both to send to
+every contact on the team.
+
 ```php
 $broadcast = $ms->broadcasts->create([
-    'audienceId' => $audienceId,
     'from' => 'Acme <news@acme.dev>',
     'subject' => 'Launch',
     'html' => '<p>Hi {{{FIRST_NAME|there}}}</p>',
+    'segmentId' => $segmentId, // optional
 ]);
 $ms->broadcasts->list();
 $ms->broadcasts->get($id);
@@ -153,13 +153,12 @@ $ms->broadcasts->remove($id);                                       // draft onl
 
 ### Segments (MillionSend extension)
 
-Dynamic segments are a saved filter over an audience's contacts — a MillionSend
-superset with no Resend equivalent (served at `/segments2`).
+Dynamic segments are a saved filter over the team's contacts — a MillionSend
+superset with no Resend equivalent.
 
 ```php
 $ms->segments->create([
     'name' => 'Pro plan',
-    'audienceId' => $audienceId,
     'filter' => [
         'match' => 'all',
         'conditions' => [['field' => 'property:plan', 'op' => 'equals', 'value' => 'pro']],
@@ -184,8 +183,10 @@ Method names, nesting, and payloads match `resend-php`. Notes:
 
 - **Domains and API keys** are managed in the MillionSend dashboard, not via the
   API, so there are no `->domains`/`->apiKeys` resources here.
-- Resend's `->segments` is an alias of audiences; MillionSend's `->segments` is
-  the distinct dynamic-filter feature. Use `->audiences` for a straight port.
+- **No audiences.** Contacts are team-global, so there is no `->audiences`
+  resource and no `audienceId` params — drop the audience id and the calls map
+  straight over. MillionSend's `->segments` is the distinct dynamic-filter
+  feature, not Resend's audience alias.
 
 ## License
 
