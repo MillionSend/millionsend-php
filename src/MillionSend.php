@@ -26,8 +26,8 @@ final class MillionSend
     /**
      * @param string|null $apiKey  Falls back to env MILLIONSEND_API_KEY. Missing → throws.
      * @param string|null $baseUrl Falls back to env MILLIONSEND_BASE_URL, then http://localhost:3001.
-     * @param array{client?: ClientInterface, userAgent?: string} $options
-     *        `client` injects a Guzzle client (tests, proxies); `userAgent` appends a suffix.
+     * @param array{client?: ClientInterface, userAgent?: string, timeout?: float, connectTimeout?: float} $options
+     *        `client` injects a Guzzle client (tests, proxies); timeouts are seconds.
      */
     public static function client(?string $apiKey = null, ?string $baseUrl = null, array $options = []): Client
     {
@@ -43,6 +43,8 @@ final class MillionSend
             $baseUrl,
             $options['client'] ?? null,
             $options['userAgent'] ?? null,
+            $options['timeout'] ?? 30.0,
+            $options['connectTimeout'] ?? 10.0,
         );
 
         return new Client($http);

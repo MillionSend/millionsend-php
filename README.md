@@ -46,6 +46,8 @@ MillionSend::client(
     options: [
         'client' => $guzzle,          // inject a GuzzleHttp\ClientInterface (proxies, tests)
         'userAgent' => 'acme-app/2.1', // suffix appended after the SDK's own token
+        'timeout' => 30.0,            // total request timeout, seconds
+        'connectTimeout' => 10.0,     // connection timeout, seconds
     ],
 );
 ```

@@ -26,7 +26,12 @@ final class HttpClient
         ?string $baseUrl = null,
         ?ClientInterface $http = null,
         ?string $userAgent = null,
+        private readonly float $timeout = 30.0,
+        private readonly float $connectTimeout = 10.0,
     ) {
+        if ($this->timeout <= 0 || $this->connectTimeout <= 0) {
+            throw new \InvalidArgumentException('HTTP timeouts must be greater than zero.');
+        }
         $resolved = $baseUrl ?? (getenv('MILLIONSEND_BASE_URL') ?: null) ?? 'http://localhost:3001';
         $this->baseUrl = rtrim($resolved, '/');
         $this->http = $http ?? new GuzzleClient();
@@ -57,7 +62,12 @@ final class HttpClient
             $headers['Idempotency-Key'] = $idempotencyKey;
         }
 
-        $options = ['headers' => $headers, 'http_errors' => false];
+        $options = [
+            'headers' => $headers,
+            'http_errors' => false,
+            'timeout' => $this->timeout,
+            'connect_timeout' => $this->connectTimeout,
+        ];
         if ($query !== []) {
             $options['query'] = $query;
         }

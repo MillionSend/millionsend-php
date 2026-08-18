@@ -27,6 +27,11 @@ describe('construction', function () {
         putenv($prev === false ? 'MILLIONSEND_API_KEY' : 'MILLIONSEND_API_KEY=' . $prev);
     });
 
+    it('rejects invalid request deadlines', function () {
+        expect(fn () => MillionSend::client('ms_test', null, ['timeout' => 0.0]))
+            ->toThrow(InvalidArgumentException::class);
+    });
+
     it('strips a trailing slash from the base URL', function () {
         [$ms, $spy] = fakeClient(200, ['id' => 'e1'], 'https://api.test/');
         $ms->emails->get('e1');
