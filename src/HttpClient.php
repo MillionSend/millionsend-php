@@ -15,7 +15,7 @@ use MillionSend\Exceptions\ErrorException;
  */
 final class HttpClient
 {
-    public const VERSION = '0.1.0';
+    public const VERSION = '0.2.0';
 
     private readonly string $baseUrl;
     private readonly string $userAgent;
@@ -28,15 +28,33 @@ final class HttpClient
         ?string $userAgent = null,
         private readonly float $timeout = 30.0,
         private readonly float $connectTimeout = 10.0,
+        bool $allowInsecureHttp = false,
     ) {
         if ($this->timeout <= 0 || $this->connectTimeout <= 0) {
             throw new \InvalidArgumentException('HTTP timeouts must be greater than zero.');
         }
         $resolved = $baseUrl ?? (getenv('MILLIONSEND_BASE_URL') ?: null) ?? 'http://localhost:3001';
         $this->baseUrl = rtrim($resolved, '/');
+        // The API key travels as a bearer header, so plain http is loopback-only by default.
+        if (!$allowInsecureHttp && Util::isInsecureHttpUrl($this->baseUrl)) {
+            throw new \InvalidArgumentException(
+                "Refusing to send the API key over plain http to {$this->baseUrl}. "
+                . "Use https, or pass ['allowInsecureHttp' => true]."
+            );
+        }
         $this->http = $http ?? new GuzzleClient();
         $base = 'millionsend-php/' . self::VERSION;
         $this->userAgent = $userAgent !== null ? "{$base} {$userAgent}" : $base;
+    }
+
+    /**
+     * Keeps the API key out of var_dump/print_r output.
+     *
+     * @return array<string,string>
+     */
+    public function __debugInfo(): array
+    {
+        return ['baseUrl' => $this->baseUrl, 'userAgent' => $this->userAgent];
     }
 
     /**

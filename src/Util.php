@@ -29,6 +29,20 @@ final class Util
         return $out;
     }
 
+    private const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+    /** True for an http:// URL whose host is not loopback. Unparseable URLs are left to the transport. */
+    public static function isInsecureHttpUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+        if ($parts === false || strtolower($parts['scheme'] ?? '') !== 'http') {
+            return false;
+        }
+        $host = strtolower($parts['host'] ?? '');
+
+        return !in_array($host, self::LOOPBACK_HOSTS, true) && !str_starts_with($host, '127.');
+    }
+
     /**
      * Keyset list params (limit/after/before), dropping any that are unset.
      *

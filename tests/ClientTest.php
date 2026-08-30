@@ -32,6 +32,33 @@ describe('construction', function () {
             ->toThrow(InvalidArgumentException::class);
     });
 
+    it('refuses a non-loopback http base URL unless allowInsecureHttp is set', function () {
+        expect(fn () => MillionSend::client('ms_test', 'http://mail.example.com'))
+            ->toThrow(InvalidArgumentException::class, 'allowInsecureHttp');
+
+        $prev = getenv('MILLIONSEND_BASE_URL');
+        putenv('MILLIONSEND_BASE_URL=http://mail.example.com');
+        try {
+            expect(fn () => MillionSend::client('ms_test'))->toThrow(InvalidArgumentException::class);
+        } finally {
+            putenv($prev === false ? 'MILLIONSEND_BASE_URL' : 'MILLIONSEND_BASE_URL=' . $prev);
+        }
+
+        expect(MillionSend::client('ms_test', 'http://mail.example.com', ['allowInsecureHttp' => true]))
+            ->toBeInstanceOf(Client::class);
+        expect(MillionSend::client('ms_test', 'http://localhost:3001'))->toBeInstanceOf(Client::class);
+        expect(MillionSend::client('ms_test', 'http://127.0.0.1:3001'))->toBeInstanceOf(Client::class);
+    });
+
+    it('keeps the API key out of debug output', function () {
+        $ms = MillionSend::client('ms_secret_key', 'https://api.test');
+
+        expect(print_r($ms, true))->not->toContain('ms_secret_key');
+        ob_start();
+        var_dump($ms);
+        expect((string) ob_get_clean())->not->toContain('ms_secret_key');
+    });
+
     it('strips a trailing slash from the base URL', function () {
         [$ms, $spy] = fakeClient(200, ['id' => 'e1'], 'https://api.test/');
         $ms->emails->get('e1');

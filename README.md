@@ -48,12 +48,17 @@ MillionSend::client(
         'userAgent' => 'acme-app/2.1', // suffix appended after the SDK's own token
         'timeout' => 30.0,            // total request timeout, seconds
         'connectTimeout' => 10.0,     // connection timeout, seconds
+        'allowInsecureHttp' => false, // accept a non-loopback http:// baseUrl
     ],
 );
 ```
 
 MillionSend is self-hosted, so there is no cloud default — **set `baseUrl` (or
-`MILLIONSEND_BASE_URL`) to your deployment in production.**
+`MILLIONSEND_BASE_URL`) to your deployment in production.** Plain `http://` is only
+accepted for loopback hosts (`localhost`, `127.0.0.1`, `::1`); any other `http://` URL
+throws `InvalidArgumentException` at construction, since the API key is sent as a bearer
+header. Pass `'allowInsecureHttp' => true` to talk to a non-TLS instance elsewhere (e.g.
+inside a private network).
 
 ## Errors
 
