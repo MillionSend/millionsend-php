@@ -13,6 +13,120 @@ describe('emails', function () {
         expect($spy->at(1)->getMethod())->toBe('POST');
         expect($spy->at(1)->getUri()->getPath())->toBe('/emails/e1/cancel');
     });
+
+    it('get surfaces the score field, present or null', function () {
+        [$ms] = fakeClient(200, ['object' => 'email', 'id' => 'e1', 'score' => 8.5]);
+        expect($ms->emails->get('e1')['score'])->toBe(8.5);
+
+        [$ms] = fakeClient(200, ['object' => 'email', 'id' => 'e1', 'score' => null]);
+        expect($ms->emails->get('e1')['score'])->toBeNull();
+    });
+
+    it('getInsights returns the full report', function () {
+        $insights = [
+            'object' => 'email_insights',
+            'email_id' => 'e1',
+            'score' => 8.5,
+            'score_version' => 1,
+            'band' => 'excellent',
+            'marketing' => true,
+            'html_size_bytes' => 12345,
+            'computed_at' => '2026-08-31T12:00:00Z',
+            'checks' => [
+                [
+                    'id' => 'list_unsubscribe',
+                    'severity' => 'critical',
+                    'status' => 'fail',
+                    'penalty' => 1.25,
+                    'detail' => ['header' => null, 'reason' => 'missing'],
+                ],
+                ['id' => 'plain_text_part', 'severity' => 'minor', 'status' => 'pass', 'penalty' => 0],
+            ],
+        ];
+        [$ms, $spy] = fakeClient(200, $insights);
+
+        expect($ms->emails->getInsights('e1'))->toEqual($insights);
+        expect($spy->at(0)->getMethod())->toBe('GET');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/emails/e1/insights');
+    });
+
+    it('getInsights passes unknown future check ids, statuses and bands through untouched', function () {
+        [$ms] = fakeClient(200, [
+            'object' => 'email_insights',
+            'email_id' => 'e1',
+            'score' => 5.0,
+            'score_version' => 9,
+            'band' => 'stellar',
+            'marketing' => false,
+            'html_size_bytes' => null,
+            'computed_at' => '2026-08-31T12:00:00Z',
+            'checks' => [['id' => 'brand_new_check', 'severity' => 'info', 'status' => 'deferred', 'penalty' => 0]],
+        ]);
+        $res = $ms->emails->getInsights('e1');
+
+        expect($res['band'])->toBe('stellar');
+        expect($res['checks'][0]['status'])->toBe('deferred');
+    });
+
+    it('getInsights throws not_found when insights are unavailable', function () {
+        [$ms] = fakeClient(404, ['statusCode' => 404, 'name' => 'not_found', 'message' => 'Email not found']);
+
+        try {
+            $ms->emails->getInsights('missing');
+            $this->fail('expected an ErrorException');
+        } catch (MillionSend\Exceptions\ErrorException $e) {
+            expect($e->getStatusCode())->toBe(404);
+            expect($e->getErrorName())->toBe('not_found');
+        }
+    });
+});
+
+describe('deliverability', function () {
+    it('get returns the account score', function () {
+        $report = [
+            'object' => 'deliverability',
+            'score' => 8.7,
+            'band' => 'good',
+            'content_score' => 8.2,
+            'outcome_score' => 9.1,
+            'complaint_rate' => 0.0002,
+            'hard_bounce_rate' => 0.001,
+            'emails_sent' => 12345,
+            'scored_recipients' => 23456,
+            'window_days' => 30,
+            'insufficient_outcome_data' => false,
+            'guardrail_status' => 'ok',
+            'score_version' => 1,
+        ];
+        [$ms, $spy] = fakeClient(200, $report);
+
+        expect($ms->deliverability->get())->toEqual($report);
+        expect($spy->at(0)->getMethod())->toBe('GET');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/deliverability');
+    });
+
+    it('get keeps null scores null when there is not enough data', function () {
+        [$ms] = fakeClient(200, [
+            'object' => 'deliverability',
+            'score' => null,
+            'band' => null,
+            'content_score' => null,
+            'outcome_score' => null,
+            'complaint_rate' => 0,
+            'hard_bounce_rate' => 0,
+            'emails_sent' => 0,
+            'scored_recipients' => 0,
+            'window_days' => 30,
+            'insufficient_outcome_data' => true,
+            'guardrail_status' => 'ok',
+            'score_version' => 1,
+        ]);
+        $res = $ms->deliverability->get();
+
+        expect($res['score'])->toBeNull();
+        expect($res['band'])->toBeNull();
+        expect($res['insufficient_outcome_data'])->toBeTrue();
+    });
 });
 
 describe('batch', function () {

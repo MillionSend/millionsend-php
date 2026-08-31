@@ -85,7 +85,8 @@ Successful calls return the decoded JSON body as an associative array.
 
 ```php
 $ms->emails->send($payload, ['idempotencyKey' => $key]);   // POST /emails
-$ms->emails->get($id);                                      // GET /emails/:id
+$ms->emails->get($id);                                      // GET /emails/:id (includes a nullable 0-10 `score`)
+$ms->emails->getInsights($id);                              // GET /emails/:id/insights (404 until computed)
 $ms->emails->cancel($id);                                   // POST /emails/:id/cancel (scheduled only)
 $ms->batch->send([$payloadA, $payloadB], ['idempotencyKey' => $key]); // up to 100
 ```
@@ -175,6 +176,16 @@ $ms->segments->get($id);   // includes a live contact_count
 $ms->segments->list();
 $ms->segments->update($id, ['name' => 'Pro tier']);
 $ms->segments->remove($id);
+```
+
+### Deliverability (MillionSend extension)
+
+The account-level deliverability score over the trailing window. Scores are
+0-10 with one decimal; `score`/`band` are `null` until there is enough data.
+
+```php
+$report = $ms->deliverability->get();  // GET /deliverability
+echo "{$report['score']} ({$report['band']})\n";
 ```
 
 ## Migrating from Resend

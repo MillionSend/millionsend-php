@@ -61,6 +61,17 @@ final class Emails
         return $this->http->request('GET', '/emails/' . rawurlencode($id));
     }
 
+    /**
+     * GET /emails/:id/insights — the pre-send best-practice report. 404 when
+     * the email is unknown or has no insights yet.
+     *
+     * @return array<mixed>
+     */
+    public function getInsights(string $id): array
+    {
+        return $this->http->request('GET', '/emails/' . rawurlencode($id) . '/insights');
+    }
+
     /** POST /emails/:id/cancel — only scheduled, unsent emails. @return array<mixed> */
     public function cancel(string $id): array
     {
