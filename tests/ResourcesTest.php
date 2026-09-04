@@ -192,6 +192,28 @@ describe('contacts', function () {
         expect($spy->at(1)->getUri()->getQuery())->toBe('after=cur');
     });
 
+    it('topics->get lists the effective subscriptions of a contact addressed by email', function () {
+        $list = [
+            'object' => 'list',
+            'has_more' => false,
+            'data' => [
+                ['id' => 't1', 'name' => 'Insights', 'description' => null, 'subscription' => 'opt_in', 'explicit' => false],
+                ['id' => 't2', 'name' => 'Releases', 'description' => 'Ship notes', 'subscription' => 'opt_out', 'explicit' => true],
+            ],
+        ];
+        [$ms, $spy] = fakeClient(200, $list);
+
+        expect($ms->contacts->topics->get('c@x.dev'))->toBe($list);
+        expect($spy->at(0)->getMethod())->toBe('GET');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/c%40x.dev/topics');
+        expect($spy->at(0)->getUri()->getQuery())->toBe('');
+        expect(bodyOf($spy->at(0)))->toBeNull();
+
+        expect($ms->contacts->topics->list('c1'))->toBe($list);
+        expect($spy->at(1)->getMethod())->toBe('GET');
+        expect($spy->at(1)->getUri()->getPath())->toBe('/contacts/c1/topics');
+    });
+
     it('topics->update patches /contacts/:id/topics with the bare array', function () {
         [$ms, $spy] = fakeClient(200, ['id' => 'c1']);
         $ms->contacts->topics->update([

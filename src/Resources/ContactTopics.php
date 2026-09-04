@@ -12,6 +12,24 @@ final class ContactTopics
     public function __construct(private readonly HttpClient $http) {}
 
     /**
+     * GET /contacts/:idOrEmail/topics — every topic with the contact's effective
+     * `subscription` (opt_in|opt_out); `explicit` is false when that is just the
+     * topic default. resend-php's name; {@see list()} is an alias.
+     *
+     * @return array<mixed>
+     */
+    public function get(string $contact): array
+    {
+        return $this->http->request('GET', self::path($contact));
+    }
+
+    /** @return array<mixed> */
+    public function list(string $contact): array
+    {
+        return $this->get($contact);
+    }
+
+    /**
      * PATCH /contacts/:idOrEmail/topics — body is the bare subscription array.
      * Two shapes: resend-php's `update($idOrEmail, $topics)` where `$topics` is
      * the list itself (or `['topics' => $list]`), or a single array carrying the
@@ -29,6 +47,11 @@ final class ContactTopics
         }
         $list = $topics['topics'] ?? $topics;
 
-        return $this->http->request('PATCH', '/contacts/' . rawurlencode($contact) . '/topics', array_values($list));
+        return $this->http->request('PATCH', self::path($contact), array_values($list));
+    }
+
+    private static function path(string $contact): string
+    {
+        return '/contacts/' . rawurlencode($contact) . '/topics';
     }
 }

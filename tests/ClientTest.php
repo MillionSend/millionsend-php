@@ -59,6 +59,27 @@ describe('construction', function () {
         expect((string) ob_get_clean())->not->toContain('ms_secret_key');
     });
 
+    it('defaults the base URL to MillionSend Cloud; the env var and the explicit argument win', function () {
+        $prev = getenv('MILLIONSEND_BASE_URL');
+        putenv('MILLIONSEND_BASE_URL');
+        try {
+            [$ms, $spy] = fakeClient(200, ['id' => 'e1'], null);
+            $ms->emails->get('e1');
+            expect((string) $spy->last()->getUri())->toBe('https://api.millionsend.com/emails/e1');
+
+            putenv('MILLIONSEND_BASE_URL=https://env.test');
+            [$ms, $spy] = fakeClient(200, ['id' => 'e1'], null);
+            $ms->emails->get('e1');
+            expect((string) $spy->last()->getUri())->toBe('https://env.test/emails/e1');
+
+            [$ms, $spy] = fakeClient(200, ['id' => 'e1'], 'https://explicit.test');
+            $ms->emails->get('e1');
+            expect((string) $spy->last()->getUri())->toBe('https://explicit.test/emails/e1');
+        } finally {
+            putenv($prev === false ? 'MILLIONSEND_BASE_URL' : 'MILLIONSEND_BASE_URL=' . $prev);
+        }
+    });
+
     it('strips a trailing slash from the base URL', function () {
         [$ms, $spy] = fakeClient(200, ['id' => 'e1'], 'https://api.test/');
         $ms->emails->get('e1');
@@ -235,6 +256,6 @@ describe('wire body completeness', function () {
         [$ms, $spy] = fakeClient();
         $ms->emails->get('e1');
 
-        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.4.0');
+        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.5.0');
     });
 });

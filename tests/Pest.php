@@ -36,7 +36,7 @@ final class RequestSpy
  * @param array<mixed>|string $body
  * @return array{0: Client, 1: RequestSpy}
  */
-function fakeClient(int $status = 200, array|string $body = ['id' => 'id_1'], string $baseUrl = 'https://api.test'): array
+function fakeClient(int $status = 200, array|string $body = ['id' => 'id_1'], ?string $baseUrl = 'https://api.test'): array
 {
     $spy = new RequestSpy();
     $payload = is_string($body) ? $body : (string) json_encode($body);

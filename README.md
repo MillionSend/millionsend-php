@@ -4,8 +4,8 @@ Official PHP SDK for [MillionSend](https://github.com/MillionSend) — a self-ho
 
 The API is wire-compatible with Resend, and this SDK deliberately mirrors the
 shape of [`resend-php`](https://github.com/resend/resend-php), so migrating is
-mostly a find-and-replace: swap the factory, and point the base URL at your
-instance.
+mostly a find-and-replace: swap the factory (and, for a self-hosted instance,
+point the base URL at it).
 
 ## Install
 
@@ -21,7 +21,8 @@ Requires PHP 8.1+.
 use MillionSend\MillionSend;
 use MillionSend\Exceptions\ErrorException;
 
-$ms = MillionSend::client('ms_123', 'https://mail.acme.dev');
+$ms = MillionSend::client('ms_123');                            // MillionSend Cloud
+// $ms = MillionSend::client('ms_123', 'https://mail.acme.dev'); // self-hosted
 
 try {
     $email = $ms->emails->send([
@@ -42,7 +43,7 @@ try {
 ```php
 MillionSend::client(
     apiKey: 'ms_123',                 // falls back to env MILLIONSEND_API_KEY; missing → throws
-    baseUrl: 'https://mail.acme.dev', // falls back to env MILLIONSEND_BASE_URL, then http://localhost:3001
+    baseUrl: 'https://mail.acme.dev', // falls back to env MILLIONSEND_BASE_URL, then https://api.millionsend.com
     options: [
         'client' => $guzzle,          // inject a GuzzleHttp\ClientInterface (proxies, tests)
         'userAgent' => 'acme-app/2.1', // suffix appended after the SDK's own token
@@ -53,8 +54,8 @@ MillionSend::client(
 );
 ```
 
-MillionSend is self-hosted, so there is no cloud default — **set `baseUrl` (or
-`MILLIONSEND_BASE_URL`) to your deployment in production.** Plain `http://` is only
+With just an API key the client talks to MillionSend Cloud (`https://api.millionsend.com`).
+A self-hosted instance sets its origin via `baseUrl` or `MILLIONSEND_BASE_URL`. Plain `http://` is only
 accepted for loopback hosts (`localhost`, `127.0.0.1`, `::1`); any other `http://` URL
 throws `InvalidArgumentException` at construction, since the API key is sent as a bearer
 header. Pass `'allowInsecureHttp' => true` to talk to a non-TLS instance elsewhere (e.g.
@@ -80,6 +81,9 @@ Every non-2xx response throws `MillionSend\Exceptions\ErrorException`. Its
 (`validation_error`, `not_found`, `restricted_api_key`, `sending_paused`, …).
 Client-side and transport failures (a request that never reached the API) throw
 the same exception with `getStatusCode()` returning `null`.
+
+`emails->send()` and `batch->send()` throw a 422 `all_recipients_suppressed` when every
+`to` recipient is on the suppression list or has opted out of the send's `topic_id`.
 
 ```php
 try {
@@ -165,7 +169,11 @@ $ms->contacts->remove($id);
 $ms->contacts->list(['limit' => 50]);
 $ms->contacts->list(['segment_id' => $segmentId]);          // GET /segments/:id/contacts
 
-// Topic subscriptions (granular unsubscribe) — PATCH /contacts/:id/topics
+// Topic subscriptions (granular unsubscribe)
+$ms->contacts->topics->get($idOrEmail);   // GET /contacts/:id/topics (->list() is an alias)
+// => ['object' => 'list', 'has_more' => false, 'data' => [
+//      ['id' => …, 'name' => 'Insights', 'description' => null, 'subscription' => 'opt_in', 'explicit' => false], …]]
+//    `subscription` is the effective choice; `explicit` is false when it is the topic default.
 $ms->contacts->topics->update($idOrEmail, [['id' => $topicId, 'subscription' => 'opt_out']]);
 $ms->contacts->topics->update([                                    // single-array shape also works
     'email' => 'ada@acme.dev',
@@ -358,7 +366,8 @@ $usage['today']['emails_sent'];
 - use Resend;
 - $resend = Resend::client('re_123');
 + use MillionSend\MillionSend;
-+ $ms = MillionSend::client('ms_123', 'https://mail.acme.dev');
++ $ms = MillionSend::client('ms_123');                            // MillionSend Cloud
++ $ms = MillionSend::client('ms_123', 'https://mail.acme.dev');  // self-hosted
 ```
 
 Method names, nesting, options (`idempotency_key`, `batch_validation`) and payloads
@@ -370,7 +379,7 @@ match `resend-php`; snake_case payloads pass through to the wire untouched. Note
   they are not part of this SDK.) `->segments` keeps Resend's method names;
   membership is a dynamic `filter` rather than a static list.
 - **Not offered here** (no MillionSend endpoint): `->contacts->imports`,
-  `->contacts->topics->get()`, `->contacts->segments->list()`, email
+  `->contacts->segments->list()`, email
   `share()`/`metrics()`, `->emails->attachments`/`->receiving`, `->webhooks->events`
   and the local `verify()` helper, `->domains->claims`, `->broadcasts->recipients()`
   /`->clickedLinks`, `->apiKeys->update()`, and the `->events`/`->logs`/`->automations`
