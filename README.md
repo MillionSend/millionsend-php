@@ -78,7 +78,7 @@ Successful calls return the decoded JSON body as an associative array.
 
 Every non-2xx response throws `MillionSend\Exceptions\ErrorException`. Its
 `getErrorName()` is a stable snake_case code you can branch on
-(`validation_error`, `not_found`, `restricted_api_key`, `sending_paused`, …).
+(`validation_error`, `not_found`, `restricted_api_key`, `sending_paused`, `all_recipients_suppressed`, …).
 Client-side and transport failures (a request that never reached the API) throw
 the same exception with `getStatusCode()` returning `null`.
 
