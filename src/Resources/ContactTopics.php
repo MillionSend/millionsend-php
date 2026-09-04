@@ -14,7 +14,8 @@ final class ContactTopics
     /**
      * GET /contacts/:idOrEmail/topics — every topic with the contact's effective
      * `subscription` (opt_in|opt_out); `explicit` is false when that is just the
-     * topic default. resend-php's name; {@see list()} is an alias.
+     * topic default; `visibility` (public|private) says whether the hosted
+     * preference page lists it. resend-php's name; {@see list()} is an alias.
      *
      * @return array<mixed>
      */

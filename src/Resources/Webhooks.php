@@ -7,10 +7,10 @@ namespace MillionSend\Resources;
 use MillionSend\HttpClient;
 use MillionSend\Util;
 
-/** Webhook endpoints. `get` is the only call that returns the `signing_secret`. */
+/** Webhook endpoints. `get` and `rotate` are the only calls that return the `signing_secret`. */
 final class Webhooks
 {
-    private const WIRE_MAP = ['signingSecret' => 'signing_secret'];
+    private const WIRE_MAP = ['signingSecret' => 'signing_secret', 'overlapHours' => 'overlap_hours'];
 
     public function __construct(private readonly HttpClient $http) {}
 
@@ -25,10 +25,23 @@ final class Webhooks
         return $this->http->request('POST', '/webhooks', Util::body($params, self::WIRE_MAP));
     }
 
-    /** @return array<mixed> */
+    /** @return array<mixed> Includes `previous_secret_expires_at` (null when no rotation overlap window is open). */
     public function get(string $id): array
     {
         return $this->http->request('GET', '/webhooks/' . rawurlencode($id));
+    }
+
+    /**
+     * POST /webhooks/:id/rotate — mints a new secret (or takes `signingSecret`).
+     * For `overlapHours` (0..72) deliveries carry both the new and the previous
+     * signature, so the receiver can switch without a gap.
+     *
+     * @param array{signingSecret?: string, overlapHours?: int} $params
+     * @return array<mixed>
+     */
+    public function rotate(string $id, array $params = []): array
+    {
+        return $this->http->request('POST', '/webhooks/' . rawurlencode($id) . '/rotate', Util::body($params, self::WIRE_MAP));
     }
 
     /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */

@@ -40,7 +40,8 @@ final class Client
     public readonly Deliverability $deliverability;
     public readonly Usage $usage;
 
-    public function __construct(HttpClient $http)
+    /** Raw transport, for endpoints this SDK does not wrap yet: `$ms->http->request('POST', '/path', $body)`. */
+    public function __construct(public readonly HttpClient $http)
     {
         $this->emails = new Emails($http);
         $this->batch = new Batch($http);

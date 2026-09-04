@@ -197,8 +197,8 @@ describe('contacts', function () {
             'object' => 'list',
             'has_more' => false,
             'data' => [
-                ['id' => 't1', 'name' => 'Insights', 'description' => null, 'subscription' => 'opt_in', 'explicit' => false],
-                ['id' => 't2', 'name' => 'Releases', 'description' => 'Ship notes', 'subscription' => 'opt_out', 'explicit' => true],
+                ['id' => 't1', 'name' => 'Insights', 'description' => null, 'subscription' => 'opt_in', 'explicit' => false, 'visibility' => 'public'],
+                ['id' => 't2', 'name' => 'Releases', 'description' => 'Ship notes', 'subscription' => 'opt_out', 'explicit' => true, 'visibility' => 'private'],
             ],
         ];
         [$ms, $spy] = fakeClient(200, $list);
@@ -486,6 +486,48 @@ describe('contacts (full body, batch, segments)', function () {
         expect($spy->at(2)->getUri()->getQuery())->toBe('');
     });
 
+    it('batch->remove posts ids or emails to /contacts/batch/remove', function () {
+        $response = ['data' => [['object' => 'contact', 'contact' => 'c1', 'deleted' => true]]];
+        [$ms, $spy] = fakeClient(200, $response);
+
+        expect($ms->contacts->batch->remove(['ids' => ['c1', 'c2']]))->toBe($response);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/batch/remove');
+        expect(bodyOf($spy->at(0)))->toBe(['ids' => ['c1', 'c2']]);
+
+        $ms->contacts->batch->remove(['emails' => ['a@x.dev']]);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/contacts/batch/remove');
+        expect(bodyOf($spy->at(1)))->toBe(['emails' => ['a@x.dev']]);
+    });
+
+    it('preferencesLink posts without a body, addressed by id or email', function () {
+        $response = ['object' => 'preferences_link', 'contact' => 'c1', 'url' => 'https://app.test/unsubscribe/tok'];
+        [$ms, $spy] = fakeClient(200, $response);
+
+        expect($ms->contacts->preferencesLink('c1'))->toBe($response);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/c1/preferences-link');
+        expect((string) $spy->at(0)->getBody())->toBe('');
+
+        $ms->contacts->preferencesLink('c@x.dev');
+        expect($spy->at(1)->getUri()->getPath())->toBe('/contacts/' . rawurlencode('c@x.dev') . '/preferences-link');
+
+        $ms->contacts->preferencesLink(['id' => 'c1', 'email' => 'c@x.dev']);
+        expect($spy->at(2)->getUri()->getPath())->toBe('/contacts/' . rawurlencode('c@x.dev') . '/preferences-link');
+    });
+
+    it('preferencesLink surfaces the 422 of an instance without hosted links', function () {
+        [$ms] = fakeClient(422, ['statusCode' => 422, 'name' => 'validation_error', 'message' => 'APP_BASE_URL must be set']);
+
+        try {
+            $ms->contacts->preferencesLink('c1');
+            $this->fail('expected an ErrorException');
+        } catch (MillionSend\Exceptions\ErrorException $e) {
+            expect($e->getStatusCode())->toBe(422);
+            expect($e->getErrorName())->toBe('validation_error');
+        }
+    });
+
     it('segments->add and ->remove address the contact by id or email', function () {
         [$ms, $spy] = fakeClient(200, ['id' => 'c1']);
 
@@ -676,6 +718,30 @@ describe('webhooks', function () {
         $ms->webhooks->remove('w1');
         expect($spy->at(4)->getMethod())->toBe('DELETE');
         expect($spy->at(4)->getUri()->getPath())->toBe('/webhooks/w1');
+    });
+
+    it('get surfaces previous_secret_expires_at, set or null', function () {
+        [$ms] = fakeClient(200, ['object' => 'webhook', 'id' => 'w1', 'signing_secret' => 'whsec_1', 'previous_secret_expires_at' => '2026-01-02T00:00:00.000Z']);
+        expect($ms->webhooks->get('w1')['previous_secret_expires_at'])->toBe('2026-01-02T00:00:00.000Z');
+
+        [$ms] = fakeClient(200, ['object' => 'webhook', 'id' => 'w1', 'signing_secret' => 'whsec_1', 'previous_secret_expires_at' => null]);
+        expect($ms->webhooks->get('w1')['previous_secret_expires_at'])->toBeNull();
+    });
+
+    it('rotate posts {} by default and maps signingSecret/overlapHours to the wire', function () {
+        $response = ['object' => 'webhook', 'id' => 'w1', 'signing_secret' => 'whsec_2', 'previous_secret_expires_at' => null];
+        [$ms, $spy] = fakeClient(200, $response);
+
+        expect($ms->webhooks->rotate('w1'))->toBe($response);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/webhooks/w1/rotate');
+        expect((string) $spy->at(0)->getBody())->toBe('{}');
+
+        $ms->webhooks->rotate('w1', ['signingSecret' => 'whsec_mine', 'overlapHours' => 0]);
+        expect(bodyOf($spy->at(1)))->toBe(['signing_secret' => 'whsec_mine', 'overlap_hours' => 0]);
+
+        $ms->webhooks->rotate('w1', ['overlap_hours' => 72]);
+        expect(bodyOf($spy->at(2)))->toBe(['overlap_hours' => 72]);
     });
 });
 

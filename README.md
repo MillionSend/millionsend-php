@@ -172,13 +172,19 @@ $ms->contacts->list(['segment_id' => $segmentId]);          // GET /segments/:id
 // Topic subscriptions (granular unsubscribe)
 $ms->contacts->topics->get($idOrEmail);   // GET /contacts/:id/topics (->list() is an alias)
 // => ['object' => 'list', 'has_more' => false, 'data' => [
-//      ['id' => …, 'name' => 'Insights', 'description' => null, 'subscription' => 'opt_in', 'explicit' => false], …]]
-//    `subscription` is the effective choice; `explicit` is false when it is the topic default.
+//      ['id' => …, 'name' => 'Insights', 'description' => null, 'subscription' => 'opt_in', 'explicit' => false, 'visibility' => 'public'], …]]
+//    `subscription` is the effective choice; `explicit` is false when it is the topic default;
+//    `visibility` (public|private) says whether the hosted preference page lists the topic.
 $ms->contacts->topics->update($idOrEmail, [['id' => $topicId, 'subscription' => 'opt_out']]);
 $ms->contacts->topics->update([                                    // single-array shape also works
     'email' => 'ada@acme.dev',
     'topics' => [['id' => $topicId, 'subscription' => 'opt_out']],
 ]);
+
+// Hosted preference page (MillionSend extension) — the page the emails' unsubscribe links open
+$link = $ms->contacts->preferencesLink($idOrEmail);          // POST /contacts/:id/preferences-link
+$link['url'];   // no expiry: whoever holds it can change that contact's preferences, so show it only to the contact
+//              // 422 when the instance cannot build hosted links (self-hosted without APP_BASE_URL)
 
 // Segment membership
 $ms->contacts->segments->add($idOrEmail, $segmentId);       // POST /contacts/:id/segments/:segmentId
@@ -192,6 +198,10 @@ $result = $ms->contacts->batch->create($contacts, [
 // $result['data'][] = ['index' => 0, 'id' => '…', 'status' => 'created'|'updated'|'skipped']
 // $result['counts'] = ['created' => n, 'updated' => n, 'skipped' => n, 'failed' => n]
 // $result['errors'][] = ['index' => 3, 'message' => '…']   (permissive mode)
+
+// Bulk delete (MillionSend extension) — exactly one of ids or emails, up to 1000
+$ms->contacts->batch->remove(['ids' => [...]]);      // or ['emails' => [...]] (case-insensitive)
+// => ['data' => [['object' => 'contact', 'contact' => '…', 'deleted' => true], …]]  only the rows actually deleted
 ```
 
 ### Contact properties
@@ -303,10 +313,24 @@ $hook = $ms->webhooks->create([
 ]);
 $hook['signing_secret'];
 $ms->webhooks->list();
-$ms->webhooks->get($id);               // the only read that includes signing_secret
+$ms->webhooks->get($id);               // the only read that includes signing_secret (and previous_secret_expires_at)
 $ms->webhooks->update($id, ['status' => 'disabled', 'events' => ['email.bounced']]);
 $ms->webhooks->remove($id);
+
+// Rotate the signing secret (MillionSend extension)
+$rotated = $ms->webhooks->rotate($id);                                    // mints a new secret, 24h overlap
+$rotated = $ms->webhooks->rotate($id, ['signing_secret' => $mine, 'overlap_hours' => 0]); // bring your own; 0..72
+$rotated['signing_secret'];
+$rotated['previous_secret_expires_at'];  // ISO timestamp while the old secret still co-signs deliveries, else null
 ```
+
+During the overlap every delivery carries both signatures (new first, then previous,
+space-separated in `webhook-signature`), so a receiver holding either verifies.
+
+Subscribable `events` include `email.*` plus the contact and suppression events:
+`contact.created`, `contact.updated`, `contact.deleted`, `contact.unsubscribed`,
+`contact.resubscribed`, `contact.topic_opt_in`, `contact.topic_opt_out`,
+`suppression.added`, `suppression.removed`.
 
 ### API keys
 
@@ -385,8 +409,23 @@ match `resend-php`; snake_case payloads pass through to the wire untouched. Note
   /`->clickedLinks`, `->apiKeys->update()`, and the `->events`/`->logs`/`->automations`
   services. Domain `tls`/`capabilities` pass through and are answered with 422.
 - **MillionSend extensions** (no Resend counterpart): segment `filter`,
-  `->contacts->batch`, `->emails->getInsights()`, `->emails->remove()`,
+  `->contacts->batch`, `->contacts->preferencesLink()`, `->webhooks->rotate()`,
+  `->emails->getInsights()`, `->emails->remove()`,
   `->deliverability`, `->usage`.
+
+## Calling endpoints the SDK does not wrap yet
+
+The transport is public as `$ms->http`. It adds auth and the User-Agent, sends the
+`Idempotency-Key` header on POST, and maps errors to `ErrorException` exactly like the
+wrapped methods do:
+
+```php
+$ms->http->request('POST', '/some/new/endpoint', ['key' => 'value']);          // JSON body
+$ms->http->request('GET', '/some/new/endpoint', null, ['limit' => 10]);        // query string
+$ms->http->request('POST', '/emails', $payload, [], $idempotencyKey);           // Idempotency-Key
+// request(string $method, string $path, array|object|null $body = null, array $query = [],
+//         ?string $idempotencyKey = null, array $headers = []): array
+```
 
 ## License
 

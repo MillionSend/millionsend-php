@@ -89,6 +89,19 @@ describe('construction', function () {
 });
 
 describe('request wiring', function () {
+    it('exposes the transport for endpoints the SDK does not wrap', function () {
+        [$ms, $spy] = fakeClient(200, ['ok' => true]);
+
+        expect($ms->http->request('POST', '/future/thing', ['a' => 1], ['q' => 'x'], 'idem-1'))->toBe(['ok' => true]);
+        $req = $spy->last();
+        expect($req->getMethod())->toBe('POST');
+        expect($req->getUri()->getPath())->toBe('/future/thing');
+        expect($req->getUri()->getQuery())->toBe('q=x');
+        expect(bodyOf($req))->toBe(['a' => 1]);
+        expect($req->getHeaderLine('Authorization'))->toBe('Bearer ms_test');
+        expect($req->getHeaderLine('Idempotency-Key'))->toBe('idem-1');
+    });
+
     it('sets Bearer auth, Accept, User-Agent and Content-Type on writes', function () {
         [$ms, $spy] = fakeClient();
         $ms->emails->send(['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => 's', 'html' => '<p>h</p>']);
@@ -256,6 +269,6 @@ describe('wire body completeness', function () {
         [$ms, $spy] = fakeClient();
         $ms->emails->get('e1');
 
-        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.5.0');
+        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.6.0');
     });
 });

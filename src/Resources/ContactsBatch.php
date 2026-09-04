@@ -7,7 +7,7 @@ namespace MillionSend\Resources;
 use MillionSend\HttpClient;
 use MillionSend\Util;
 
-/** Bulk contact creation (MillionSend extension; Resend imports contacts only via CSV). */
+/** Bulk contact creation and deletion (MillionSend extension; Resend imports via CSV and deletes one at a time). */
 final class ContactsBatch
 {
     public function __construct(private readonly HttpClient $http) {}
@@ -38,5 +38,17 @@ final class ContactsBatch
             null,
             Util::optionHeaders($options),
         );
+    }
+
+    /**
+     * POST /contacts/batch/remove — by `ids` or by `emails` (exactly one, 1..1000).
+     * Lists only the rows actually deleted; unknown ids/addresses are skipped.
+     *
+     * @param array{ids?: list<string>, emails?: list<string>} $params
+     * @return array<mixed>
+     */
+    public function remove(array $params): array
+    {
+        return $this->http->request('POST', '/contacts/batch/remove', Util::body($params));
     }
 }

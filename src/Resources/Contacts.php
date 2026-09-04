@@ -85,6 +85,20 @@ final class Contacts
     }
 
     /**
+     * POST /contacts/:idOrEmail/preferences-link — the contact's hosted
+     * preference page (public topics + global unsubscribe). The URL never
+     * expires and lets its holder change that contact's preferences, so show it
+     * only to the contact. 422 when the instance cannot build hosted links.
+     *
+     * @param string|array<string,mixed> $contact
+     * @return array<mixed>
+     */
+    public function preferencesLink(string|array $contact): array
+    {
+        return $this->http->request('POST', self::path(self::normalize($contact)) . '/preferences-link');
+    }
+
+    /**
      * Convenience alias of `$contacts->topics->update(...)`.
      *
      * @param array{id?: string, email?: string, topics: list<array{id: string, subscription: string}>} $params
