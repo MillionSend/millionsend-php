@@ -204,6 +204,20 @@ describe('contacts', function () {
         expect(bodyOf($spy->at(0)))->toEqual([['id' => 't1', 'subscription' => 'opt_out']]);
     });
 
+    it('topics->update takes the resend-php ($idOrEmail, $topics) shape', function () {
+        [$ms, $spy] = fakeClient(200, ['id' => 'c1']);
+        $topics = [['id' => 't1', 'subscription' => 'opt_out'], ['id' => 't2', 'subscription' => 'opt_in']];
+
+        $ms->contacts->topics->update('c@x.dev', $topics);
+        expect($spy->at(0)->getMethod())->toBe('PATCH');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/' . rawurlencode('c@x.dev') . '/topics');
+        expect(bodyOf($spy->at(0)))->toBe($topics);
+
+        $ms->contacts->topics->update('c1', ['topics' => $topics]);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/contacts/c1/topics');
+        expect(bodyOf($spy->at(1)))->toBe($topics);
+    });
+
     it('updateTopics alias resolves the address by email', function () {
         [$ms, $spy] = fakeClient(200, ['id' => 'c1']);
         $ms->contacts->updateTopics([
@@ -291,9 +305,10 @@ describe('segments', function () {
         expect($spy->at(2)->getUri()->getPath())->toBe('/segments');
         expect($spy->at(2)->getUri()->getQuery())->toBe('before=cur');
 
-        $ms->segments->update('s1', ['name' => 'Renamed']);
+        $ms->segments->update('s1', ['name' => 'Renamed', 'filter' => null]);
         expect($spy->at(3)->getMethod())->toBe('PATCH');
         expect($spy->at(3)->getUri()->getPath())->toBe('/segments/s1');
+        expect(bodyOf($spy->at(3)))->toBe(['name' => 'Renamed', 'filter' => null]);
 
         $ms->segments->remove('s1');
         expect($spy->at(4)->getMethod())->toBe('DELETE');
@@ -507,8 +522,8 @@ describe('topics (update, visibility)', function () {
     it('creates with visibility and patches name/visibility', function () {
         [$ms, $spy] = fakeClient();
 
-        $ms->topics->create(['name' => 'Product', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
-        expect(bodyOf($spy->at(0)))->toBe(['name' => 'Product', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
+        $ms->topics->create(['name' => 'Product', 'description' => 'Releases', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
+        expect(bodyOf($spy->at(0)))->toBe(['name' => 'Product', 'description' => 'Releases', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
 
         $ms->topics->update('t1', ['visibility' => 'private']);
         expect($spy->at(1)->getMethod())->toBe('PATCH');

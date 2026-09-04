@@ -43,9 +43,10 @@ final class Domains
     }
 
     /**
-     * PATCH /domains/:id — `trackingSubdomain => null` clears it.
+     * PATCH /domains/:id — `trackingSubdomain => null` clears it. resend-php's
+     * `tls` and `capabilities` pass through; the server answers 422 for them.
      *
-     * @param array{openTracking?: bool, clickTracking?: bool, trackingSubdomain?: string|null} $params
+     * @param array{openTracking?: bool, clickTracking?: bool, trackingSubdomain?: string|null, tls?: mixed, capabilities?: mixed} $params
      * @return array<mixed>
      */
     public function update(string $id, array $params): array

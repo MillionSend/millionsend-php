@@ -15,7 +15,7 @@ final class Topics
     public function __construct(private readonly HttpClient $http) {}
 
     /**
-     * @param array{name: string, defaultSubscription: string, visibility?: string} $params
+     * @param array{name: string, defaultSubscription: string, description?: string, visibility?: string} $params
      * @return array<mixed>
      */
     public function create(array $params): array
@@ -35,7 +35,7 @@ final class Topics
         return $this->http->request('GET', '/topics');
     }
 
-    /** @param array{name?: string, visibility?: string} $params @return array<mixed> */
+    /** @param array{name?: string, description?: string, visibility?: string} $params @return array<mixed> */
     public function update(string $id, array $params): array
     {
         return $this->http->request('PATCH', '/topics/' . rawurlencode($id), Util::body($params, self::WIRE_MAP));

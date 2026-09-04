@@ -165,8 +165,9 @@ $ms->contacts->remove($id);
 $ms->contacts->list(['limit' => 50]);
 $ms->contacts->list(['segment_id' => $segmentId]);          // GET /segments/:id/contacts
 
-// Topic subscriptions (granular unsubscribe)
-$ms->contacts->topics->update([
+// Topic subscriptions (granular unsubscribe) — PATCH /contacts/:id/topics
+$ms->contacts->topics->update($idOrEmail, [['id' => $topicId, 'subscription' => 'opt_out']]);
+$ms->contacts->topics->update([                                    // single-array shape also works
     'email' => 'ada@acme.dev',
     'topics' => [['id' => $topicId, 'subscription' => 'opt_out']],
 ]);
@@ -198,7 +199,7 @@ $ms->contactProperties->remove($id);
 ### Topics
 
 ```php
-$ms->topics->create(['name' => 'Product updates', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
+$ms->topics->create(['name' => 'Product updates', 'description' => 'Releases', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
 $ms->topics->get($id);
 $ms->topics->list();     // bare { data } — topics are unpaginated
 $ms->topics->update($id, ['name' => 'Product news', 'visibility' => 'private']);
@@ -232,10 +233,12 @@ $ms->broadcasts->cancel($id);                                                 //
 $ms->broadcasts->remove($id);                                                 // draft only
 ```
 
-### Segments (MillionSend extension)
+### Segments
 
-Dynamic segments are a saved filter over the team's contacts — a MillionSend
-superset with no Resend equivalent.
+Same methods as `resend-php`'s `->segments`, but membership is dynamic: a segment
+is a saved `filter` over the team's contacts (the `filter` field is the MillionSend
+extension). Omit it — or set it to `null` on update — for a manual segment whose
+members come from `contacts->segments->add()`.
 
 ```php
 $ms->segments->create([
@@ -364,12 +367,15 @@ match `resend-php`; snake_case payloads pass through to the wire untouched. Note
 - **No audiences.** Contacts are team-global, so there is no `->audiences`
   resource and no `audience_id` params — drop the audience id and the calls map
   straight over. (The API keeps `/audiences/...` routes as a compatibility shim;
-  they are not part of this SDK.) MillionSend's `->segments` is the distinct
-  dynamic-filter feature, not Resend's audience alias.
-- **Not offered here:** contact CSV imports, email `share`/`metrics`, webhook
-  local `verify()`, API key `update`, and the `->events`/`->logs`/`->automations`
-  services.
-- **MillionSend extensions** (no Resend counterpart): `->segments`,
+  they are not part of this SDK.) `->segments` keeps Resend's method names;
+  membership is a dynamic `filter` rather than a static list.
+- **Not offered here** (no MillionSend endpoint): `->contacts->imports`,
+  `->contacts->topics->get()`, `->contacts->segments->list()`, email
+  `share()`/`metrics()`, `->emails->attachments`/`->receiving`, `->webhooks->events`
+  and the local `verify()` helper, `->domains->claims`, `->broadcasts->recipients()`
+  /`->clickedLinks`, `->apiKeys->update()`, and the `->events`/`->logs`/`->automations`
+  services. Domain `tls`/`capabilities` pass through and are answered with 422.
+- **MillionSend extensions** (no Resend counterpart): segment `filter`,
   `->contacts->batch`, `->emails->getInsights()`, `->emails->remove()`,
   `->deliverability`, `->usage`.
 

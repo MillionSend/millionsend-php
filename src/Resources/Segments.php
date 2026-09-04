@@ -8,8 +8,9 @@ use MillionSend\HttpClient;
 use MillionSend\Util;
 
 /**
- * Dynamic segments — a saved filter over the team's contacts (MillionSend
- * extension, no Resend equivalent). `get` returns a live `contact_count`.
+ * Segments — same methods as resend-php's, but membership is dynamic: a
+ * segment is a saved `filter` over the team's contacts (the filter itself is
+ * the MillionSend extension). `get` returns a live `contact_count`.
  */
 final class Segments
 {
