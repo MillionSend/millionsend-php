@@ -16,15 +16,12 @@ final class Segments
     public function __construct(private readonly HttpClient $http) {}
 
     /**
-     * @param array{name: string, filter: array<string,mixed>} $params
+     * @param array{name: string, filter?: array<string,mixed>|null} $params
      * @return array<mixed>
      */
     public function create(array $params): array
     {
-        return $this->http->request('POST', '/segments', Util::pick($params, [
-            'name' => 'name',
-            'filter' => 'filter',
-        ]) ?: new \stdClass());
+        return $this->http->request('POST', '/segments', Util::body($params));
     }
 
     /** @return array<mixed> */
@@ -39,13 +36,10 @@ final class Segments
         return $this->http->request('GET', '/segments', null, Util::listQuery($options));
     }
 
-    /** @param array{name?: string, filter?: array<string,mixed>} $params @return array<mixed> */
+    /** @param array{name?: string, filter?: array<string,mixed>|null} $params @return array<mixed> */
     public function update(string $id, array $params): array
     {
-        return $this->http->request('PATCH', '/segments/' . rawurlencode($id), Util::pick($params, [
-            'name' => 'name',
-            'filter' => 'filter',
-        ]) ?: new \stdClass());
+        return $this->http->request('PATCH', '/segments/' . rawurlencode($id), Util::body($params));
     }
 
     /** @return array<mixed> */

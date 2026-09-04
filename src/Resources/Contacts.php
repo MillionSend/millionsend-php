@@ -14,36 +14,31 @@ use MillionSend\Util;
 final class Contacts
 {
     public readonly ContactTopics $topics;
+    public readonly ContactSegments $segments;
+    public readonly ContactsBatch $batch;
 
-    private const CREATE_MAP = [
-        'email' => 'email',
+    /** camelCase aliases => wire names; every other key passes through. Shared with {@see ContactsBatch}. */
+    public const WIRE_MAP = [
         'firstName' => 'first_name',
         'lastName' => 'last_name',
-        'unsubscribed' => 'unsubscribed',
-        'properties' => 'properties',
-    ];
-
-    private const UPDATE_MAP = [
-        'firstName' => 'first_name',
-        'lastName' => 'last_name',
-        'unsubscribed' => 'unsubscribed',
-        'properties' => 'properties',
     ];
 
     public function __construct(private readonly HttpClient $http)
     {
         $this->topics = new ContactTopics($http);
+        $this->segments = new ContactSegments($http);
+        $this->batch = new ContactsBatch($http);
     }
 
     /**
      * POST /contacts — 409 validation_error when the email already exists on the team.
      *
-     * @param array{email: string, firstName?: string, lastName?: string, unsubscribed?: bool, properties?: array<string,mixed>} $params
+     * @param array{email: string, firstName?: string, lastName?: string, unsubscribed?: bool, properties?: array<string,mixed>, segments?: list<array{id: string}>, topics?: list<array{id: string, subscription: string}>} $params
      * @return array<mixed>
      */
     public function create(array $params): array
     {
-        return $this->http->request('POST', '/contacts', Util::pick($params, self::CREATE_MAP) ?: new \stdClass());
+        return $this->http->request('POST', '/contacts', Util::body($params, self::WIRE_MAP));
     }
 
     /** @param string|array<string,mixed> $contact @return array<mixed> */
@@ -54,13 +49,19 @@ final class Contacts
 
     /**
      * PATCH — a null value clears a field; omit a key to leave it unchanged.
+     * Two shapes: resend-php's `update($idOrEmail, $params)`, or a single array
+     * carrying the address (`id`/`email`) alongside the fields to change.
      *
-     * @param array{id?: string, email?: string, firstName?: string|null, lastName?: string|null, unsubscribed?: bool, properties?: array<string,mixed>} $params
+     * @param string|array<string,mixed> $contact
+     * @param array{firstName?: string|null, lastName?: string|null, unsubscribed?: bool, properties?: array<string,mixed>} $params
      * @return array<mixed>
      */
-    public function update(array $params): array
+    public function update(string|array $contact, array $params = []): array
     {
-        return $this->http->request('PATCH', self::path($params), Util::pick($params, self::UPDATE_MAP) ?: new \stdClass());
+        $addr = self::normalize($contact);
+        $fields = $params === [] ? array_diff_key($addr, ['id' => true, 'email' => true]) : $params;
+
+        return $this->http->request('PATCH', self::path($addr), Util::body($fields, self::WIRE_MAP));
     }
 
     /** @param string|array<string,mixed> $contact @return array<mixed> */
@@ -69,10 +70,18 @@ final class Contacts
         return $this->http->request('DELETE', self::path(self::normalize($contact)));
     }
 
-    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /**
+     * GET /contacts, or GET /segments/:id/contacts when `segmentId`/`segment_id` is given.
+     *
+     * @param array{limit?: int, after?: string, before?: string, segmentId?: string, segment_id?: string} $options
+     * @return array<mixed>
+     */
     public function list(array $options = []): array
     {
-        return $this->http->request('GET', '/contacts', null, Util::listQuery($options));
+        $segment = $options['segmentId'] ?? $options['segment_id'] ?? null;
+        $path = $segment === null ? '/contacts' : '/segments/' . rawurlencode((string) $segment) . '/contacts';
+
+        return $this->http->request('GET', $path, null, Util::listQuery($options));
     }
 
     /**

@@ -299,3 +299,463 @@ describe('segments', function () {
         expect($spy->at(4)->getMethod())->toBe('DELETE');
     });
 });
+
+describe('emails (list, update, remove)', function () {
+    it('lists with keyset params, reschedules and deletes', function () {
+        [$ms, $spy] = fakeClient();
+
+        $ms->emails->list(['limit' => 10, 'after' => 'cur']);
+        expect($spy->at(0)->getMethod())->toBe('GET');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/emails');
+        expect($spy->at(0)->getUri()->getQuery())->toBe('limit=10&after=cur');
+
+        $ms->emails->update('e1', ['scheduledAt' => '2999-01-01T00:00:00Z']);
+        expect($spy->at(1)->getMethod())->toBe('PATCH');
+        expect($spy->at(1)->getUri()->getPath())->toBe('/emails/e1');
+        expect(bodyOf($spy->at(1)))->toBe(['scheduled_at' => '2999-01-01T00:00:00Z']);
+
+        $ms->emails->update('e1', ['scheduled_at' => 'in 2 hours']);
+        expect(bodyOf($spy->at(2)))->toBe(['scheduled_at' => 'in 2 hours']);
+
+        $ms->emails->remove('e1');
+        expect($spy->at(3)->getMethod())->toBe('DELETE');
+        expect($spy->at(3)->getUri()->getPath())->toBe('/emails/e1');
+    });
+});
+
+describe('batch validation', function () {
+    it('sends x-batch-validation and surfaces permissive-mode errors', function () {
+        [$ms, $spy] = fakeClient(200, [
+            'data' => [['id' => '1']],
+            'errors' => [['index' => 1, 'message' => 'Invalid `to`']],
+        ]);
+        $res = $ms->batch->send(
+            [
+                ['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => '1', 'text' => 'one', 'replyTo' => 'r@x.dev'],
+                ['from' => 'a@x.dev', 'to' => 'nope', 'subject' => '2', 'text' => 'two', 'headers' => ['X-A' => '1']],
+            ],
+            ['batch_validation' => 'permissive', 'idempotency_key' => 'b-1'],
+        );
+
+        $req = $spy->at(0);
+        expect($req->getHeaderLine('x-batch-validation'))->toBe('permissive');
+        expect($req->getHeaderLine('Idempotency-Key'))->toBe('b-1');
+        expect(bodyOf($req))->toBe([
+            ['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => '1', 'text' => 'one', 'reply_to' => 'r@x.dev'],
+            ['from' => 'a@x.dev', 'to' => 'nope', 'subject' => '2', 'text' => 'two', 'headers' => ['X-A' => '1']],
+        ]);
+        expect($res['errors'])->toBe([['index' => 1, 'message' => 'Invalid `to`']]);
+    });
+
+    it('accepts the camelCase option name and omits the header by default', function () {
+        [$ms, $spy] = fakeClient(200, ['data' => []]);
+        $ms->batch->create([['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => 's', 'text' => 't']]);
+        expect($spy->at(0)->hasHeader('x-batch-validation'))->toBeFalse();
+
+        $ms->batch->create(
+            [['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => 's', 'text' => 't']],
+            ['batchValidation' => 'strict'],
+        );
+        expect($spy->at(1)->getHeaderLine('x-batch-validation'))->toBe('strict');
+    });
+});
+
+describe('contacts (full body, batch, segments)', function () {
+    it('create puts every field on the wire', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->contacts->create([
+            'email' => 'c@x.dev',
+            'firstName' => 'Ada',
+            'lastName' => 'Lovelace',
+            'unsubscribed' => false,
+            'properties' => ['plan' => 'pro', 'seats' => 3],
+            'segments' => [['id' => 's1']],
+            'topics' => [['id' => 't1', 'subscription' => 'opt_in']],
+        ]);
+
+        expect(bodyOf($spy->at(0)))->toBe([
+            'email' => 'c@x.dev',
+            'first_name' => 'Ada',
+            'last_name' => 'Lovelace',
+            'unsubscribed' => false,
+            'properties' => ['plan' => 'pro', 'seats' => 3],
+            'segments' => [['id' => 's1']],
+            'topics' => [['id' => 't1', 'subscription' => 'opt_in']],
+        ]);
+    });
+
+    it('update takes the resend-php ($idOrEmail, $params) shape and clears with null', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->contacts->update('c@x.dev', ['lastName' => null, 'properties' => ['plan' => null]]);
+
+        expect($spy->at(0)->getMethod())->toBe('PATCH');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/' . rawurlencode('c@x.dev'));
+        expect(bodyOf($spy->at(0)))->toBe(['last_name' => null, 'properties' => ['plan' => null]]);
+
+        $ms->contacts->update(['id' => 'c1'], ['first_name' => 'Ada']);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/contacts/c1');
+        expect(bodyOf($spy->at(1)))->toBe(['first_name' => 'Ada']);
+    });
+
+    it('update with the single-array shape never leaks id/email into the body', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->contacts->update(['id' => 'c1', 'email' => 'c@x.dev', 'first_name' => 'Ada']);
+
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/' . rawurlencode('c@x.dev'));
+        expect(bodyOf($spy->at(0)))->toBe(['first_name' => 'Ada']);
+    });
+
+    it('list routes to /segments/:id/contacts when a segment is given', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->contacts->list(['segmentId' => 's1', 'limit' => 5]);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/segments/s1/contacts');
+        expect($spy->at(0)->getUri()->getQuery())->toBe('limit=5');
+
+        $ms->contacts->list(['segment_id' => 's2']);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/segments/s2/contacts');
+    });
+
+    it('batch->create posts a bare array with on_conflict and the validation header', function () {
+        $response = [
+            'data' => [['object' => 'contact', 'index' => 0, 'id' => 'c1', 'status' => 'created']],
+            'counts' => ['created' => 1, 'updated' => 0, 'skipped' => 0, 'failed' => 1],
+            'errors' => [['index' => 1, 'message' => 'Invalid email']],
+        ];
+        [$ms, $spy] = fakeClient(200, $response);
+        $res = $ms->contacts->batch->create(
+            [
+                ['email' => 'a@x.dev', 'firstName' => 'A', 'topics' => [['id' => 't1', 'subscription' => 'opt_out']]],
+                ['email' => 'nope', 'last_name' => 'B'],
+            ],
+            ['on_conflict' => 'upsert', 'batch_validation' => 'permissive'],
+        );
+
+        $req = $spy->at(0);
+        expect($req->getMethod())->toBe('POST');
+        expect($req->getUri()->getPath())->toBe('/contacts/batch');
+        expect($req->getUri()->getQuery())->toBe('on_conflict=upsert');
+        expect($req->getHeaderLine('x-batch-validation'))->toBe('permissive');
+        expect(bodyOf($req))->toBe([
+            ['email' => 'a@x.dev', 'first_name' => 'A', 'topics' => [['id' => 't1', 'subscription' => 'opt_out']]],
+            ['email' => 'nope', 'last_name' => 'B'],
+        ]);
+        expect($res)->toBe($response);
+
+        $ms->contacts->batch->create([['email' => 'a@x.dev']], ['onConflict' => 'skip']);
+        expect($spy->at(1)->getUri()->getQuery())->toBe('on_conflict=skip');
+        expect($spy->at(1)->hasHeader('x-batch-validation'))->toBeFalse();
+
+        $ms->contacts->batch->create([['email' => 'a@x.dev']]);
+        expect($spy->at(2)->getUri()->getQuery())->toBe('');
+    });
+
+    it('segments->add and ->remove address the contact by id or email', function () {
+        [$ms, $spy] = fakeClient(200, ['id' => 'c1']);
+
+        $ms->contacts->segments->add('c1', 's1');
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/c1/segments/s1');
+        expect((string) $spy->at(0)->getBody())->toBe('');
+
+        $ms->contacts->segments->remove('c@x.dev', 's1');
+        expect($spy->at(1)->getMethod())->toBe('DELETE');
+        expect($spy->at(1)->getUri()->getPath())->toBe('/contacts/' . rawurlencode('c@x.dev') . '/segments/s1');
+    });
+});
+
+describe('broadcasts (full body)', function () {
+    it('create puts every field on the wire', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->broadcasts->create([
+            'name' => 'Launch',
+            'segmentId' => 's1',
+            'from' => 'Acme <a@x.dev>',
+            'subject' => 'News',
+            'html' => '<p>hi</p>',
+            'text' => 'hi',
+            'replyTo' => ['r@x.dev'],
+            'previewText' => 'Preview',
+            'topicId' => 't1',
+            'send' => true,
+            'scheduledAt' => '2999-01-01T00:00:00Z',
+        ]);
+
+        expect(bodyOf($spy->at(0)))->toBe([
+            'name' => 'Launch',
+            'segment_id' => 's1',
+            'from' => 'Acme <a@x.dev>',
+            'subject' => 'News',
+            'html' => '<p>hi</p>',
+            'text' => 'hi',
+            'reply_to' => ['r@x.dev'],
+            'preview_text' => 'Preview',
+            'topic_id' => 't1',
+            'send' => true,
+            'scheduled_at' => '2999-01-01T00:00:00Z',
+        ]);
+    });
+
+    it('update clears topic and segment with explicit nulls', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->broadcasts->update('b1', ['topicId' => null, 'segment_id' => null, 'name' => 'Renamed']);
+
+        expect(bodyOf($spy->at(0)))->toBe(['topic_id' => null, 'segment_id' => null, 'name' => 'Renamed']);
+    });
+});
+
+describe('topics (update, visibility)', function () {
+    it('creates with visibility and patches name/visibility', function () {
+        [$ms, $spy] = fakeClient();
+
+        $ms->topics->create(['name' => 'Product', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
+        expect(bodyOf($spy->at(0)))->toBe(['name' => 'Product', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
+
+        $ms->topics->update('t1', ['visibility' => 'private']);
+        expect($spy->at(1)->getMethod())->toBe('PATCH');
+        expect($spy->at(1)->getUri()->getPath())->toBe('/topics/t1');
+        expect(bodyOf($spy->at(1)))->toBe(['visibility' => 'private']);
+    });
+});
+
+describe('suppressions', function () {
+    it('covers add/create/get/list/remove', function () {
+        [$ms, $spy] = fakeClient();
+
+        $ms->suppressions->add(['email' => 'x@x.dev', 'origin' => 'manual']);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/suppressions');
+        expect(bodyOf($spy->at(0)))->toBe(['email' => 'x@x.dev', 'origin' => 'manual']);
+
+        $ms->suppressions->create(['email' => 'y@x.dev']);
+        expect(bodyOf($spy->at(1)))->toBe(['email' => 'y@x.dev']);
+
+        $ms->suppressions->get('x@x.dev');
+        expect($spy->at(2)->getMethod())->toBe('GET');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/suppressions/' . rawurlencode('x@x.dev'));
+
+        $ms->suppressions->list(['limit' => 20, 'origin' => 'bounce']);
+        expect($spy->at(3)->getUri()->getPath())->toBe('/suppressions');
+        expect($spy->at(3)->getUri()->getQuery())->toBe('limit=20&origin=bounce');
+
+        $ms->suppressions->remove('sup_1');
+        expect($spy->at(4)->getMethod())->toBe('DELETE');
+        expect($spy->at(4)->getUri()->getPath())->toBe('/suppressions/sup_1');
+    });
+
+    it('batch->add and batch->remove post to the batch endpoints', function () {
+        [$ms, $spy] = fakeClient(200, ['data' => [['object' => 'suppression', 'id' => 's1']]]);
+
+        $ms->suppressions->batch->add(['emails' => ['a@x.dev', 'b@x.dev'], 'origin' => 'unsubscribe']);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/suppressions/batch/add');
+        expect(bodyOf($spy->at(0)))->toBe(['emails' => ['a@x.dev', 'b@x.dev'], 'origin' => 'unsubscribe']);
+
+        $ms->suppressions->batch->remove(['emails' => ['a@x.dev']]);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/suppressions/batch/remove');
+        expect(bodyOf($spy->at(1)))->toBe(['emails' => ['a@x.dev']]);
+
+        $ms->suppressions->batch->remove(['ids' => ['s1', 's2']]);
+        expect(bodyOf($spy->at(2)))->toBe(['ids' => ['s1', 's2']]);
+    });
+});
+
+describe('domains', function () {
+    it('covers create/list/get/verify/update/remove', function () {
+        [$ms, $spy] = fakeClient();
+
+        $ms->domains->create([
+            'name' => 'acme.dev',
+            'region' => 'us-east-1',
+            'customReturnPath' => 'bounces',
+            'openTracking' => true,
+            'clickTracking' => false,
+            'trackingSubdomain' => 'track',
+        ]);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/domains');
+        expect(bodyOf($spy->at(0)))->toBe([
+            'name' => 'acme.dev',
+            'region' => 'us-east-1',
+            'custom_return_path' => 'bounces',
+            'open_tracking' => true,
+            'click_tracking' => false,
+            'tracking_subdomain' => 'track',
+        ]);
+
+        $ms->domains->list(['limit' => 10]);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/domains');
+        expect($spy->at(1)->getUri()->getQuery())->toBe('limit=10');
+
+        $ms->domains->get('d1');
+        expect($spy->at(2)->getMethod())->toBe('GET');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/domains/d1');
+
+        $ms->domains->verify('d1');
+        expect($spy->at(3)->getMethod())->toBe('POST');
+        expect($spy->at(3)->getUri()->getPath())->toBe('/domains/d1/verify');
+
+        $ms->domains->update('d1', ['open_tracking' => false, 'clickTracking' => true, 'trackingSubdomain' => null]);
+        expect($spy->at(4)->getMethod())->toBe('PATCH');
+        expect($spy->at(4)->getUri()->getPath())->toBe('/domains/d1');
+        expect(bodyOf($spy->at(4)))->toBe(['open_tracking' => false, 'click_tracking' => true, 'tracking_subdomain' => null]);
+
+        $ms->domains->remove('d1');
+        expect($spy->at(5)->getMethod())->toBe('DELETE');
+        expect($spy->at(5)->getUri()->getPath())->toBe('/domains/d1');
+    });
+});
+
+describe('webhooks', function () {
+    it('covers create/list/get/update/remove', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'webhook', 'id' => 'w1', 'signing_secret' => 'whsec_1']);
+
+        $res = $ms->webhooks->create([
+            'endpoint' => 'https://acme.dev/hooks',
+            'events' => ['email.sent', 'email.bounced'],
+            'signingSecret' => 'whsec_1',
+        ]);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/webhooks');
+        expect(bodyOf($spy->at(0)))->toBe([
+            'endpoint' => 'https://acme.dev/hooks',
+            'events' => ['email.sent', 'email.bounced'],
+            'signing_secret' => 'whsec_1',
+        ]);
+        expect($res['signing_secret'])->toBe('whsec_1');
+
+        $ms->webhooks->list(['after' => 'cur']);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/webhooks');
+        expect($spy->at(1)->getUri()->getQuery())->toBe('after=cur');
+
+        $ms->webhooks->get('w1');
+        expect($spy->at(2)->getMethod())->toBe('GET');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/webhooks/w1');
+
+        $ms->webhooks->update('w1', ['status' => 'disabled', 'events' => ['email.delivered']]);
+        expect($spy->at(3)->getMethod())->toBe('PATCH');
+        expect($spy->at(3)->getUri()->getPath())->toBe('/webhooks/w1');
+        expect(bodyOf($spy->at(3)))->toBe(['status' => 'disabled', 'events' => ['email.delivered']]);
+
+        $ms->webhooks->remove('w1');
+        expect($spy->at(4)->getMethod())->toBe('DELETE');
+        expect($spy->at(4)->getUri()->getPath())->toBe('/webhooks/w1');
+    });
+});
+
+describe('apiKeys', function () {
+    it('covers create/list/remove', function () {
+        [$ms, $spy] = fakeClient(200, ['id' => 'k1', 'token' => 'ms_secret']);
+
+        $res = $ms->apiKeys->create(['name' => 'ci', 'permission' => 'sending_access', 'domainId' => 'd1']);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/api-keys');
+        expect(bodyOf($spy->at(0)))->toBe(['name' => 'ci', 'permission' => 'sending_access', 'domain_id' => 'd1']);
+        expect($res['token'])->toBe('ms_secret');
+
+        $ms->apiKeys->list(['limit' => 5]);
+        expect($spy->at(1)->getMethod())->toBe('GET');
+        expect($spy->at(1)->getUri()->getPath())->toBe('/api-keys');
+        expect($spy->at(1)->getUri()->getQuery())->toBe('limit=5');
+
+        $ms->apiKeys->remove('k1');
+        expect($spy->at(2)->getMethod())->toBe('DELETE');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/api-keys/k1');
+    });
+});
+
+describe('templates', function () {
+    it('covers create/list/get/update/remove/publish/duplicate', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'template', 'id' => 'tp1']);
+
+        $ms->templates->create([
+            'name' => 'Welcome',
+            'html' => '<p>Hi {{{name}}}</p>',
+            'subject' => 'Welcome',
+            'text' => 'Hi',
+            'alias' => 'welcome',
+            'replyTo' => 'support@x.dev',
+        ]);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/templates');
+        expect(bodyOf($spy->at(0)))->toBe([
+            'name' => 'Welcome',
+            'html' => '<p>Hi {{{name}}}</p>',
+            'subject' => 'Welcome',
+            'text' => 'Hi',
+            'alias' => 'welcome',
+            'reply_to' => 'support@x.dev',
+        ]);
+
+        $ms->templates->list(['before' => 'cur']);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/templates');
+        expect($spy->at(1)->getUri()->getQuery())->toBe('before=cur');
+
+        $ms->templates->get('welcome');
+        expect($spy->at(2)->getMethod())->toBe('GET');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/templates/welcome');
+
+        $ms->templates->update('welcome', ['alias' => null, 'subject' => null, 'text' => null, 'html' => '<p>v2</p>']);
+        expect($spy->at(3)->getMethod())->toBe('PATCH');
+        expect($spy->at(3)->getUri()->getPath())->toBe('/templates/welcome');
+        expect(bodyOf($spy->at(3)))->toBe(['alias' => null, 'subject' => null, 'text' => null, 'html' => '<p>v2</p>']);
+
+        $ms->templates->remove('tp1');
+        expect($spy->at(4)->getMethod())->toBe('DELETE');
+        expect($spy->at(4)->getUri()->getPath())->toBe('/templates/tp1');
+
+        $ms->templates->publish('tp1');
+        expect($spy->at(5)->getMethod())->toBe('POST');
+        expect($spy->at(5)->getUri()->getPath())->toBe('/templates/tp1/publish');
+
+        $ms->templates->duplicate('tp1');
+        expect($spy->at(6)->getMethod())->toBe('POST');
+        expect($spy->at(6)->getUri()->getPath())->toBe('/templates/tp1/duplicate');
+    });
+});
+
+describe('contactProperties', function () {
+    it('covers create/list/get/update/remove', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'contact_property', 'id' => 'p1']);
+
+        $ms->contactProperties->create(['key' => 'plan', 'type' => 'string', 'fallbackValue' => 'free']);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contact-properties');
+        expect(bodyOf($spy->at(0)))->toBe(['key' => 'plan', 'type' => 'string', 'fallback_value' => 'free']);
+
+        $ms->contactProperties->list(['limit' => 50]);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/contact-properties');
+        expect($spy->at(1)->getUri()->getQuery())->toBe('limit=50');
+
+        $ms->contactProperties->get('p1');
+        expect($spy->at(2)->getMethod())->toBe('GET');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/contact-properties/p1');
+
+        $ms->contactProperties->update('p1', ['fallback_value' => null]);
+        expect($spy->at(3)->getMethod())->toBe('PATCH');
+        expect($spy->at(3)->getUri()->getPath())->toBe('/contact-properties/p1');
+        expect(bodyOf($spy->at(3)))->toBe(['fallback_value' => null]);
+
+        $ms->contactProperties->remove('p1');
+        expect($spy->at(4)->getMethod())->toBe('DELETE');
+        expect($spy->at(4)->getUri()->getPath())->toBe('/contact-properties/p1');
+    });
+});
+
+describe('usage', function () {
+    it('get returns the plan report', function () {
+        $report = [
+            'object' => 'usage',
+            'cloud' => true,
+            'plan' => 'pro',
+            'limits' => ['emails_per_day' => 50000, 'domains' => 10],
+            'today' => ['emails_sent' => 120, 'resets_at' => '2026-09-05T00:00:00Z'],
+            'team' => ['id' => 'team_1', 'name' => 'Acme'],
+            'app_url' => 'https://app.millionsend.com',
+        ];
+        [$ms, $spy] = fakeClient(200, $report);
+
+        expect($ms->usage->get())->toBe($report);
+        expect($spy->at(0)->getMethod())->toBe('GET');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/usage');
+    });
+});

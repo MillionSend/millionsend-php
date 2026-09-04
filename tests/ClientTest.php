@@ -163,3 +163,78 @@ describe('request wiring', function () {
         }
     });
 });
+
+describe('wire body completeness', function () {
+    it('puts every send field on the wire, renaming only the camelCase aliases', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->emails->send([
+            'from' => 'Acme <a@x.dev>',
+            'to' => ['b@x.dev'],
+            'subject' => 's',
+            'html' => '<p>h</p>',
+            'text' => 'h',
+            'cc' => ['c@x.dev'],
+            'bcc' => 'd@x.dev',
+            'replyTo' => ['r@x.dev'],
+            'scheduledAt' => '2999-01-01T00:00:00Z',
+            'tags' => [['name' => 'category', 'value' => 'launch']],
+            'topicId' => '0f2f6b1e-6b2e-4d7a-9a1e-1a2b3c4d5e6f',
+            'attachments' => [[
+                'filename' => 'a.txt',
+                'content' => base64_encode('hello'),
+                'content_type' => 'text/plain',
+                'content_id' => 'cid1',
+                'path' => 'https://x.dev/a.txt',
+            ]],
+            'headers' => ['X-Entity-Ref-ID' => '123'],
+            'template' => ['id' => 'tmpl_1', 'variables' => ['name' => 'Ada']],
+        ]);
+
+        expect(bodyOf($spy->last()))->toBe([
+            'from' => 'Acme <a@x.dev>',
+            'to' => ['b@x.dev'],
+            'subject' => 's',
+            'html' => '<p>h</p>',
+            'text' => 'h',
+            'cc' => ['c@x.dev'],
+            'bcc' => 'd@x.dev',
+            'reply_to' => ['r@x.dev'],
+            'scheduled_at' => '2999-01-01T00:00:00Z',
+            'tags' => [['name' => 'category', 'value' => 'launch']],
+            'topic_id' => '0f2f6b1e-6b2e-4d7a-9a1e-1a2b3c4d5e6f',
+            'attachments' => [[
+                'filename' => 'a.txt',
+                'content' => base64_encode('hello'),
+                'content_type' => 'text/plain',
+                'content_id' => 'cid1',
+                'path' => 'https://x.dev/a.txt',
+            ]],
+            'headers' => ['X-Entity-Ref-ID' => '123'],
+            'template' => ['id' => 'tmpl_1', 'variables' => ['name' => 'Ada']],
+        ]);
+    });
+
+    it('passes a verbatim resend-php snake_case payload through unchanged', function () {
+        [$ms, $spy] = fakeClient();
+        $payload = [
+            'from' => 'a@x.dev',
+            'to' => 'b@x.dev',
+            'subject' => 's',
+            'text' => 't',
+            'reply_to' => 'r@x.dev',
+            'scheduled_at' => 'in 1 hour',
+            'topic_id' => null,
+        ];
+        $ms->emails->send($payload, ['idempotency_key' => 'resend-shape']);
+
+        expect(bodyOf($spy->last()))->toBe($payload);
+        expect($spy->last()->getHeaderLine('Idempotency-Key'))->toBe('resend-shape');
+    });
+
+    it('sends the User-Agent with the current version', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->emails->get('e1');
+
+        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.4.0');
+    });
+});

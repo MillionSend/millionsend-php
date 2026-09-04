@@ -8,25 +8,59 @@ namespace MillionSend;
 final class Util
 {
     /**
-     * Copy the keys named in $map (camelCase => snake_case), preserving explicit
-     * nulls and omitting keys absent from the input. This is what lets a contact
-     * update send `first_name: null` to clear a field while leaving untouched
-     * fields off the wire entirely.
+     * Copy every key of $input onto the wire, renaming the camelCase aliases
+     * listed in $aliases (camelCase => snake_case) and passing everything else
+     * through untouched. Explicit nulls survive, so a contact update can send
+     * `first_name: null` to clear a field, while keys absent from the input stay
+     * off the wire entirely. A verbatim snake_case payload therefore works as-is.
      *
      * @param array<string,mixed>  $input
-     * @param array<string,string> $map
+     * @param array<string,string> $aliases
      * @return array<string,mixed>
      */
-    public static function pick(array $input, array $map): array
+    public static function rename(array $input, array $aliases): array
     {
         $out = [];
-        foreach ($map as $from => $to) {
-            if (array_key_exists($from, $input)) {
-                $out[$to] = $input[$from];
-            }
+        foreach ($input as $key => $value) {
+            $out[$aliases[$key] ?? $key] = $value;
         }
 
         return $out;
+    }
+
+    /**
+     * {@see rename()} for a JSON-object body: an empty input encodes as `{}`
+     * rather than `[]`.
+     *
+     * @param array<string,mixed>  $input
+     * @param array<string,string> $aliases
+     * @return array<string,mixed>|\stdClass
+     */
+    public static function body(array $input, array $aliases = []): array|\stdClass
+    {
+        return self::rename($input, $aliases) ?: new \stdClass();
+    }
+
+    /**
+     * Per-request headers from an options array, accepting both this SDK's
+     * camelCase option names and resend-php's snake_case ones.
+     *
+     * @param array<string,mixed> $options
+     * @return array<string,string>
+     */
+    public static function optionHeaders(array $options): array
+    {
+        $headers = [];
+        $key = $options['idempotencyKey'] ?? $options['idempotency_key'] ?? null;
+        if ($key !== null) {
+            $headers['Idempotency-Key'] = (string) $key;
+        }
+        $validation = $options['batchValidation'] ?? $options['batch_validation'] ?? null;
+        if ($validation !== null) {
+            $headers['x-batch-validation'] = (string) $validation;
+        }
+
+        return $headers;
     }
 
     private const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
@@ -44,15 +78,17 @@ final class Util
     }
 
     /**
-     * Keyset list params (limit/after/before), dropping any that are unset.
+     * Keyset list params (limit/after/before, plus any $extra filter keys),
+     * dropping any that are unset.
      *
      * @param array<string,mixed> $options
+     * @param list<string>        $extra
      * @return array<string,scalar>
      */
-    public static function listQuery(array $options): array
+    public static function listQuery(array $options, array $extra = []): array
     {
         $out = [];
-        foreach (['limit', 'after', 'before'] as $key) {
+        foreach ([...['limit', 'after', 'before'], ...$extra] as $key) {
             if (isset($options[$key])) {
                 $out[$key] = $options[$key];
             }

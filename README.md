@@ -60,6 +60,19 @@ throws `InvalidArgumentException` at construction, since the API key is sent as 
 header. Pass `'allowInsecureHttp' => true` to talk to a non-TLS instance elsewhere (e.g.
 inside a private network).
 
+## Payloads
+
+Payloads are plain arrays and go on the wire as-is — every key you pass is sent, in
+snake_case exactly as `resend-php` documents it (`reply_to`, `scheduled_at`,
+`first_name`, …). The camelCase spellings this SDK has always accepted keep working
+and are renamed on the way out (`replyTo` → `reply_to`, `scheduledAt` → `scheduled_at`,
+`topicId` → `topic_id`, `firstName` → `first_name`, `segmentId` → `segment_id`,
+`previewText` → `preview_text`, and so on per resource below). A key that is present
+with a `null` value is sent as JSON `null`, which is how you clear a nullable field;
+a key you leave out stays off the wire.
+
+Successful calls return the decoded JSON body as an associative array.
+
 ## Errors
 
 Every non-2xx response throws `MillionSend\Exceptions\ErrorException`. Its
@@ -77,22 +90,24 @@ try {
 }
 ```
 
-Successful calls return the decoded JSON body as an associative array.
-
 ## Resources
 
 ### Emails
 
 ```php
-$ms->emails->send($payload, ['idempotencyKey' => $key]);   // POST /emails
-$ms->emails->get($id);                                      // GET /emails/:id (includes a nullable 0-10 `score`)
-$ms->emails->getInsights($id);                              // GET /emails/:id/insights (404 until computed)
-$ms->emails->cancel($id);                                   // POST /emails/:id/cancel (scheduled only)
-$ms->batch->send([$payloadA, $payloadB], ['idempotencyKey' => $key]); // up to 100
+$ms->emails->send($payload, ['idempotency_key' => $key]);  // POST /emails
+$ms->emails->get($id);                                     // GET /emails/:id (includes a nullable 0-10 `score`)
+$ms->emails->list(['limit' => 50, 'after' => $cursor]);    // GET /emails
+$ms->emails->update($id, ['scheduled_at' => $iso8601]);    // PATCH /emails/:id (reschedule)
+$ms->emails->cancel($id);                                  // POST /emails/:id/cancel (scheduled only)
+$ms->emails->remove($id);                                  // DELETE /emails/:id (MillionSend extension)
+$ms->emails->getInsights($id);                             // GET /emails/:id/insights (404 until computed; MillionSend extension)
 ```
 
-Send options are camelCase and mapped to the wire: `replyTo` → `reply_to`,
-`scheduledAt` → `scheduled_at`. `to`/`cc`/`bcc`/`replyTo` accept a string or an array.
+Every send field is supported: `from`, `to`, `subject`, `html`, `text`, `cc`, `bcc`,
+`reply_to`, `scheduled_at`, `tags`, `topic_id`, `attachments`, `headers` and
+`template`. `to`/`cc`/`bcc`/`reply_to` accept a string or an array. Options:
+`idempotency_key` (or `idempotencyKey`) sets the `Idempotency-Key` header.
 
 ```php
 $ms->emails->send([
@@ -100,63 +115,121 @@ $ms->emails->send([
     'to' => ['ada@acme.dev', 'grace@acme.dev'],
     'subject' => 'Launch',
     'html' => '<p>Hi</p>',
-    'replyTo' => 'support@acme.dev',
+    'reply_to' => 'support@acme.dev',
+    'scheduled_at' => 'in 1 hour',
     'tags' => [['name' => 'category', 'value' => 'launch']],
+    'topic_id' => $topicId,
+    'attachments' => [[
+        'filename' => 'invoice.pdf',
+        'content' => base64_encode($pdf),   // or 'path' => 'https://…'
+        'content_type' => 'application/pdf',
+    ]],
+    'headers' => ['X-Entity-Ref-ID' => '123'],
+], ['idempotency_key' => 'order-42']);
+```
+
+### Batch
+
+```php
+// POST /emails/batch — up to 100 emails, one call
+$ms->batch->send([$payloadA, $payloadB], [
+    'idempotency_key' => $key,
+    'batch_validation' => 'permissive', // or 'strict' (server default)
 ]);
 ```
+
+`batch_validation` (or `batchValidation`) sets the `x-batch-validation` header. In
+`strict` mode one invalid email fails the whole batch; in `permissive` mode the valid
+ones are sent and the rest come back in the response's `errors[]` as
+`[{index, message}]`.
 
 ### Contacts
 
 Contacts are team-global: one record per email address, shared by every
-broadcast and segment.
+broadcast and segment. Address them by id or by email.
 
 ```php
 $ms->contacts->create([
     'email' => 'ada@acme.dev',
-    'firstName' => 'Ada',
+    'first_name' => 'Ada',
+    'last_name' => 'Lovelace',
+    'unsubscribed' => false,
     'properties' => ['plan' => 'pro'],
+    'segments' => [['id' => $segmentId]],
+    'topics' => [['id' => $topicId, 'subscription' => 'opt_in']],
 ]);
-$ms->contacts->get(['email' => 'ada@acme.dev']);  // by id or email (email wins)
-$ms->contacts->get($contactId);                   // a bare string id works too
-$ms->contacts->update(['id' => $contactId, 'unsubscribed' => true, 'firstName' => null]); // null clears
-$ms->contacts->remove(['email' => 'ada@acme.dev']);
+$ms->contacts->get('ada@acme.dev');                         // by id or email
+$ms->contacts->update('ada@acme.dev', ['first_name' => null, 'unsubscribed' => true]); // null clears
+$ms->contacts->update(['id' => $id, 'last_name' => 'L']);   // single-array shape also works
+$ms->contacts->remove($id);
 $ms->contacts->list(['limit' => 50]);
+$ms->contacts->list(['segment_id' => $segmentId]);          // GET /segments/:id/contacts
 
 // Topic subscriptions (granular unsubscribe)
 $ms->contacts->topics->update([
     'email' => 'ada@acme.dev',
     'topics' => [['id' => $topicId, 'subscription' => 'opt_out']],
 ]);
-// $ms->contacts->updateTopics([...]) is an equivalent alias.
+
+// Segment membership
+$ms->contacts->segments->add($idOrEmail, $segmentId);       // POST /contacts/:id/segments/:segmentId
+$ms->contacts->segments->remove($idOrEmail, $segmentId);    // DELETE …
+
+// Bulk create (MillionSend extension) — up to 1000 per call
+$result = $ms->contacts->batch->create($contacts, [
+    'on_conflict' => 'upsert',          // error (default) | skip | upsert
+    'batch_validation' => 'permissive', // strict (default) | permissive
+]);
+// $result['data'][] = ['index' => 0, 'id' => '…', 'status' => 'created'|'updated'|'skipped']
+// $result['counts'] = ['created' => n, 'updated' => n, 'skipped' => n, 'failed' => n]
+// $result['errors'][] = ['index' => 3, 'message' => '…']   (permissive mode)
+```
+
+### Contact properties
+
+```php
+$ms->contactProperties->create(['key' => 'plan', 'type' => 'string', 'fallback_value' => 'free']);
+$ms->contactProperties->list();
+$ms->contactProperties->get($id);
+$ms->contactProperties->update($id, ['fallback_value' => null]);   // only the fallback is mutable
+$ms->contactProperties->remove($id);
 ```
 
 ### Topics
 
 ```php
-$ms->topics->create(['name' => 'Product updates', 'defaultSubscription' => 'opt_in']);
+$ms->topics->create(['name' => 'Product updates', 'default_subscription' => 'opt_in', 'visibility' => 'public']);
 $ms->topics->get($id);
 $ms->topics->list();     // bare { data } — topics are unpaginated
+$ms->topics->update($id, ['name' => 'Product news', 'visibility' => 'private']);
 $ms->topics->remove($id);
 ```
 
 ### Broadcasts
 
-Targeting is an optional `segmentId` and/or `topicId` — omit both to send to
+Targeting is an optional `segment_id` and/or `topic_id` — omit both to send to
 every contact on the team.
 
 ```php
 $broadcast = $ms->broadcasts->create([
+    'name' => 'Launch',
     'from' => 'Acme <news@acme.dev>',
     'subject' => 'Launch',
     'html' => '<p>Hi {{{FIRST_NAME|there}}}</p>',
-    'segmentId' => $segmentId, // optional
+    'text' => 'Hi',
+    'reply_to' => 'support@acme.dev',
+    'preview_text' => 'Something new',
+    'segment_id' => $segmentId,   // optional
+    'topic_id' => $topicId,       // optional
+    'send' => true,               // create and send in one call
+    'scheduled_at' => '2026-09-01T09:00:00Z',
 ]);
 $ms->broadcasts->list();
 $ms->broadcasts->get($id);
-$ms->broadcasts->update($id, ['subject' => 'Launch 🚀']);          // draft only
-$ms->broadcasts->send($id, ['scheduledAt' => '2026-09-01T09:00:00Z']); // omit to send now
-$ms->broadcasts->cancel($id);                                       // scheduled only
-$ms->broadcasts->remove($id);                                       // draft only
+$ms->broadcasts->update($id, ['subject' => 'Launch 🚀', 'topic_id' => null]); // draft only; null clears
+$ms->broadcasts->send($id, ['scheduled_at' => '2026-09-01T09:00:00Z']);      // omit to send now
+$ms->broadcasts->cancel($id);                                                 // scheduled only
+$ms->broadcasts->remove($id);                                                 // draft only
 ```
 
 ### Segments (MillionSend extension)
@@ -178,6 +251,85 @@ $ms->segments->update($id, ['name' => 'Pro tier']);
 $ms->segments->remove($id);
 ```
 
+### Suppressions
+
+```php
+$ms->suppressions->add(['email' => 'bounced@example.com', 'origin' => 'manual']); // ->create() is an alias
+$ms->suppressions->get($idOrEmail);
+$ms->suppressions->list(['origin' => 'bounce', 'limit' => 50]);   // origin: bounce|complaint|manual|unsubscribe
+$ms->suppressions->remove($idOrEmail);
+
+$ms->suppressions->batch->add(['emails' => [...], 'origin' => 'unsubscribe']); // up to 1000
+$ms->suppressions->batch->remove(['emails' => [...]]);   // or ['ids' => [...]]
+```
+
+### Domains
+
+```php
+$domain = $ms->domains->create([
+    'name' => 'acme.dev',
+    'region' => 'us-east-1',          // optional
+    'custom_return_path' => 'send',   // optional
+    'open_tracking' => true,
+    'click_tracking' => true,
+    'tracking_subdomain' => 'track',
+]);
+$domain['records'];                    // DNS records to publish
+$ms->domains->list();
+$ms->domains->get($id);
+$ms->domains->verify($id);             // re-check DNS
+$ms->domains->update($id, ['open_tracking' => false, 'tracking_subdomain' => null]);
+$ms->domains->remove($id);
+```
+
+### Webhooks
+
+```php
+$hook = $ms->webhooks->create([
+    'endpoint' => 'https://acme.dev/hooks/millionsend',
+    'events' => ['email.sent', 'email.delivered', 'email.bounced'],
+    'signing_secret' => $secret,       // optional — one is generated when omitted
+]);
+$hook['signing_secret'];
+$ms->webhooks->list();
+$ms->webhooks->get($id);               // the only read that includes signing_secret
+$ms->webhooks->update($id, ['status' => 'disabled', 'events' => ['email.bounced']]);
+$ms->webhooks->remove($id);
+```
+
+### API keys
+
+```php
+$key = $ms->apiKeys->create([
+    'name' => 'ci',
+    'permission' => 'sending_access',  // full_access (default) | sending_access
+    'domain_id' => $domainId,          // optional: restrict a sending key to one domain
+]);
+$key['token'];                         // shown once, never returned again
+$ms->apiKeys->list();
+$ms->apiKeys->remove($id);
+```
+
+### Templates
+
+Templates are addressable by id or alias.
+
+```php
+$ms->templates->create([
+    'name' => 'Welcome',
+    'html' => '<p>Hi {{{name}}}</p>',
+    'subject' => 'Welcome aboard',
+    'text' => 'Hi',
+    'alias' => 'welcome',
+]);
+$ms->templates->list();
+$ms->templates->get('welcome');
+$ms->templates->update('welcome', ['subject' => null, 'html' => '<p>v2</p>']); // null clears alias/subject/text
+$ms->templates->remove($idOrAlias);
+$ms->templates->publish($idOrAlias);   // no-op on MillionSend (templates are always live); kept for compatibility
+$ms->templates->duplicate($idOrAlias);
+```
+
 ### Deliverability (MillionSend extension)
 
 The account-level deliverability score over the trailing window. Scores are
@@ -186,6 +338,15 @@ The account-level deliverability score over the trailing window. Scores are
 ```php
 $report = $ms->deliverability->get();  // GET /deliverability
 echo "{$report['score']} ({$report['band']})\n";
+```
+
+### Usage (MillionSend extension)
+
+```php
+$usage = $ms->usage->get();            // GET /usage
+$usage['plan'];                        // free | pro | scale | null (self-hosted)
+$usage['limits']['emails_per_day'];
+$usage['today']['emails_sent'];
 ```
 
 ## Migrating from Resend
@@ -197,14 +358,20 @@ echo "{$report['score']} ({$report['band']})\n";
 + $ms = MillionSend::client('ms_123', 'https://mail.acme.dev');
 ```
 
-Method names, nesting, and payloads match `resend-php`. Notes:
+Method names, nesting, options (`idempotency_key`, `batch_validation`) and payloads
+match `resend-php`; snake_case payloads pass through to the wire untouched. Notes:
 
-- **Domains and API keys** are managed in the MillionSend dashboard, not via the
-  API, so there are no `->domains`/`->apiKeys` resources here.
 - **No audiences.** Contacts are team-global, so there is no `->audiences`
-  resource and no `audienceId` params — drop the audience id and the calls map
-  straight over. MillionSend's `->segments` is the distinct dynamic-filter
-  feature, not Resend's audience alias.
+  resource and no `audience_id` params — drop the audience id and the calls map
+  straight over. (The API keeps `/audiences/...` routes as a compatibility shim;
+  they are not part of this SDK.) MillionSend's `->segments` is the distinct
+  dynamic-filter feature, not Resend's audience alias.
+- **Not offered here:** contact CSV imports, email `share`/`metrics`, webhook
+  local `verify()`, API key `update`, and the `->events`/`->logs`/`->automations`
+  services.
+- **MillionSend extensions** (no Resend counterpart): `->segments`,
+  `->contacts->batch`, `->emails->getInsights()`, `->emails->remove()`,
+  `->deliverability`, `->usage`.
 
 ## License
 

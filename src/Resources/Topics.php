@@ -10,21 +10,17 @@ use MillionSend\Util;
 /** Subscription topics — granular unsubscribe categories for a team. */
 final class Topics
 {
-    private const CREATE_MAP = [
-        'name' => 'name',
-        'description' => 'description',
-        'defaultSubscription' => 'default_subscription',
-    ];
+    private const WIRE_MAP = ['defaultSubscription' => 'default_subscription'];
 
     public function __construct(private readonly HttpClient $http) {}
 
     /**
-     * @param array{name: string, description?: string, defaultSubscription: string} $params
+     * @param array{name: string, defaultSubscription: string, visibility?: string} $params
      * @return array<mixed>
      */
     public function create(array $params): array
     {
-        return $this->http->request('POST', '/topics', Util::pick($params, self::CREATE_MAP) ?: new \stdClass());
+        return $this->http->request('POST', '/topics', Util::body($params, self::WIRE_MAP));
     }
 
     /** @return array<mixed> */
@@ -37,6 +33,12 @@ final class Topics
     public function list(): array
     {
         return $this->http->request('GET', '/topics');
+    }
+
+    /** @param array{name?: string, visibility?: string} $params @return array<mixed> */
+    public function update(string $id, array $params): array
+    {
+        return $this->http->request('PATCH', '/topics/' . rawurlencode($id), Util::body($params, self::WIRE_MAP));
     }
 
     /** @return array<mixed> */

@@ -15,7 +15,7 @@ use MillionSend\Exceptions\ErrorException;
  */
 final class HttpClient
 {
-    public const VERSION = '0.3.0';
+    public const VERSION = '0.4.0';
 
     private readonly string $baseUrl;
     private readonly string $userAgent;
@@ -58,8 +58,9 @@ final class HttpClient
     }
 
     /**
-     * @param array<mixed>|object|null $body  Object bodies encode as JSON objects; list arrays stay JSON arrays.
+     * @param array<mixed>|object|null $body    Object bodies encode as JSON objects; list arrays stay JSON arrays.
      * @param array<string,scalar>     $query
+     * @param array<string,string>     $headers Extra per-request headers (see {@see Util::optionHeaders()}).
      * @return array<mixed>
      * @throws ErrorException
      */
@@ -69,11 +70,13 @@ final class HttpClient
         array|object|null $body = null,
         array $query = [],
         ?string $idempotencyKey = null,
+        array $headers = [],
     ): array {
         $headers = [
             'Authorization' => 'Bearer ' . $this->apiKey,
             'Accept' => 'application/json',
             'User-Agent' => $this->userAgent,
+            ...$headers,
         ];
         // Idempotency is POST-only on the wire; sending it elsewhere is a no-op.
         if ($idempotencyKey !== null && $method === 'POST') {
