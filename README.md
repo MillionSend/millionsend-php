@@ -168,6 +168,9 @@ $ms->contacts->update(['id' => $id, 'last_name' => 'L']);   // single-array shap
 $ms->contacts->remove($id);
 $ms->contacts->list(['limit' => 50]);
 $ms->contacts->list(['segment_id' => $segmentId]);          // GET /segments/:id/contacts
+// Bulk read (MillionSend extension): attach properties and topic subscriptions to every item,
+// so an audience reads in one request per 100 contacts instead of one per contact
+$ms->contacts->list(['limit' => 100, 'include' => ['properties', 'topics']]);   // ?include=properties,topics
 
 // Topic subscriptions (granular unsubscribe)
 $ms->contacts->topics->get($idOrEmail);   // GET /contacts/:id/topics (->list() is an alias)
@@ -198,6 +201,12 @@ $result = $ms->contacts->batch->create($contacts, [
 // $result['data'][] = ['index' => 0, 'id' => '…', 'status' => 'created'|'updated'|'skipped']
 // $result['counts'] = ['created' => n, 'updated' => n, 'skipped' => n, 'failed' => n]
 // $result['errors'][] = ['index' => 3, 'message' => '…']   (permissive mode)
+
+// Bulk lookup (MillionSend extension) — up to 1000 contacts by id or email in one request,
+// in request order; unknown entries are listed, not errors — one request against the rate limit
+$result = $ms->contacts->batch->get([$contactId, ['email' => 'ada@acme.dev']], ['include' => ['topics']]);
+// $result['data'][]    = ['object' => 'contact', 'id' => …, 'email' => …, …, 'topics' => [...]]  the contacts found
+// $result['missing'][] = ['index' => 1, 'email' => '…']   request entries that matched nobody
 
 // Bulk delete (MillionSend extension) — exactly one of ids or emails, up to 1000
 $ms->contacts->batch->remove(['ids' => [...]]);      // or ['emails' => [...]] (case-insensitive)

@@ -452,6 +452,20 @@ describe('contacts (full body, batch, segments)', function () {
         expect($spy->at(1)->getUri()->getPath())->toBe('/segments/s2/contacts');
     });
 
+    it('list joins include into one comma-separated query parameter, on the team and segment lists alike', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->contacts->list(['limit' => 100, 'include' => ['properties', 'topics']]);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts');
+        expect($spy->at(0)->getUri()->getQuery())->toBe('limit=100&include=' . rawurlencode('properties,topics'));
+
+        $ms->contacts->list(['segmentId' => 's1', 'include' => ['topics']]);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/segments/s1/contacts');
+        expect($spy->at(1)->getUri()->getQuery())->toBe('include=topics');
+
+        $ms->contacts->list();
+        expect($spy->at(2)->getUri()->getQuery())->toBe('');
+    });
+
     it('batch->create posts a bare array with on_conflict and the validation header', function () {
         $response = [
             'data' => [['object' => 'contact', 'index' => 0, 'id' => 'c1', 'status' => 'created']],
@@ -484,6 +498,33 @@ describe('contacts (full body, batch, segments)', function () {
 
         $ms->contacts->batch->create([['email' => 'a@x.dev']]);
         expect($spy->at(2)->getUri()->getQuery())->toBe('');
+    });
+
+    it('batch->get posts ids and emails with include to /contacts/batch/get and surfaces missing entries', function () {
+        $response = [
+            'object' => 'list',
+            'data' => [[
+                'object' => 'contact', 'id' => 'c1', 'email' => 'a@x.dev', 'first_name' => 'A', 'last_name' => null,
+                'created_at' => '2026-01-01T00:00:00.000Z', 'unsubscribed' => false,
+                'properties' => ['plan' => ['type' => 'string', 'value' => 'pro']],
+                'topics' => [['id' => 't1', 'name' => 'Insights', 'description' => null, 'subscription' => 'opt_in', 'explicit' => false, 'visibility' => 'public']],
+            ]],
+            'missing' => [['index' => 1, 'email' => 'nobody@x.dev']],
+        ];
+        [$ms, $spy] = fakeClient(200, $response);
+
+        $res = $ms->contacts->batch->get(['c1', ['email' => 'nobody@x.dev']], ['include' => ['properties', 'topics']]);
+        expect($res)->toBe($response);
+        expect($res['missing'])->toBe([['index' => 1, 'email' => 'nobody@x.dev']]);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/batch/get');
+        expect(bodyOf($spy->at(0)))->toBe([
+            'contacts' => [['id' => 'c1'], ['email' => 'nobody@x.dev']],
+            'include' => ['properties', 'topics'],
+        ]);
+
+        $ms->contacts->batch->get([['id' => 'c2']]);
+        expect(bodyOf($spy->at(1)))->toBe(['contacts' => [['id' => 'c2']]]);
     });
 
     it('batch->remove posts ids or emails to /contacts/batch/remove', function () {

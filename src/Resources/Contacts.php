@@ -72,16 +72,22 @@ final class Contacts
 
     /**
      * GET /contacts, or GET /segments/:id/contacts when `segmentId`/`segment_id` is given.
+     * `include` (`properties` and/or `topics`) attaches the property map and the
+     * topic subscriptions to every item (`?include=properties,topics`).
      *
-     * @param array{limit?: int, after?: string, before?: string, segmentId?: string, segment_id?: string} $options
+     * @param array{limit?: int, after?: string, before?: string, segmentId?: string, segment_id?: string, include?: list<string>} $options
      * @return array<mixed>
      */
     public function list(array $options = []): array
     {
         $segment = $options['segmentId'] ?? $options['segment_id'] ?? null;
         $path = $segment === null ? '/contacts' : '/segments/' . rawurlencode((string) $segment) . '/contacts';
+        $query = Util::listQuery($options);
+        if (isset($options['include'])) {
+            $query['include'] = implode(',', (array) $options['include']);
+        }
 
-        return $this->http->request('GET', $path, null, Util::listQuery($options));
+        return $this->http->request('GET', $path, null, $query);
     }
 
     /**
@@ -110,10 +116,12 @@ final class Contacts
     }
 
     /**
+     * A bare string is an id. Shared with {@see ContactsBatch}.
+     *
      * @param string|array<string,mixed> $contact
      * @return array<string,mixed>
      */
-    private static function normalize(string|array $contact): array
+    public static function normalize(string|array $contact): array
     {
         return is_string($contact) ? ['id' => $contact] : $contact;
     }

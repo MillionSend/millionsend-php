@@ -7,7 +7,7 @@ namespace MillionSend\Resources;
 use MillionSend\HttpClient;
 use MillionSend\Util;
 
-/** Bulk contact creation and deletion (MillionSend extension; Resend imports via CSV and deletes one at a time). */
+/** Bulk contact creation, lookup and deletion (MillionSend extension; Resend imports via CSV and reads/deletes one at a time). */
 final class ContactsBatch
 {
     public function __construct(private readonly HttpClient $http) {}
@@ -38,6 +38,28 @@ final class ContactsBatch
             null,
             Util::optionHeaders($options),
         );
+    }
+
+    /**
+     * POST /contacts/batch/get — 1..1000 contacts by id (a bare string) or by
+     * `['id' => …]` / `['email' => …]` (exactly one per entry; emails match
+     * case-insensitively). `data` lists the contacts found in request order;
+     * entries that match nobody land in `missing` (with their request `index`)
+     * instead of failing the call. `include` (`properties` and/or `topics`)
+     * attaches those to every contact. One call is one request against the rate limit.
+     *
+     * @param list<string|array{id?: string, email?: string}> $contacts
+     * @param array{include?: list<string>} $options
+     * @return array<mixed>
+     */
+    public function get(array $contacts, array $options = []): array
+    {
+        $body = ['contacts' => array_map(Contacts::normalize(...), array_values($contacts))];
+        if (isset($options['include'])) {
+            $body['include'] = $options['include'];
+        }
+
+        return $this->http->request('POST', '/contacts/batch/get', $body);
     }
 
     /**
