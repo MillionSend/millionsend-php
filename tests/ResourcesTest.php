@@ -186,10 +186,23 @@ describe('contacts', function () {
 
         $ms->contacts->remove(['email' => 'c@x.dev']);
         expect($spy->at(0)->getMethod())->toBe('DELETE');
+        expect($spy->at(0)->getUri()->getQuery())->toBe('');
 
         $ms->contacts->list(['after' => 'cur']);
         expect($spy->at(1)->getUri()->getPath())->toBe('/contacts');
         expect($spy->at(1)->getUri()->getQuery())->toBe('after=cur');
+    });
+
+    it('remove sends ?erase=true only when asked', function () {
+        [$ms, $spy] = fakeClient();
+
+        $ms->contacts->remove('c1', ['erase' => true]);
+        expect($spy->at(0)->getMethod())->toBe('DELETE');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/contacts/c1');
+        expect($spy->at(0)->getUri()->getQuery())->toBe('erase=true');
+
+        $ms->contacts->remove('c1', ['erase' => false]);
+        expect($spy->at(1)->getUri()->getQuery())->toBe('');
     });
 
     it('topics->get lists the effective subscriptions of a contact addressed by email', function () {
@@ -539,6 +552,9 @@ describe('contacts (full body, batch, segments)', function () {
         $ms->contacts->batch->remove(['emails' => ['a@x.dev']]);
         expect($spy->at(1)->getUri()->getPath())->toBe('/contacts/batch/remove');
         expect(bodyOf($spy->at(1)))->toBe(['emails' => ['a@x.dev']]);
+
+        $ms->contacts->batch->remove(['emails' => ['a@x.dev'], 'erase' => true]);
+        expect(bodyOf($spy->at(2)))->toBe(['emails' => ['a@x.dev'], 'erase' => true]);
     });
 
     it('preferencesLink posts without a body, addressed by id or email', function () {

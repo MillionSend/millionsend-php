@@ -15,7 +15,7 @@ use MillionSend\Exceptions\ErrorException;
  */
 final class HttpClient
 {
-    public const VERSION = '0.7.0';
+    public const VERSION = '0.8.0';
 
     private readonly string $baseUrl;
     private readonly string $userAgent;

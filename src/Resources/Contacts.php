@@ -64,10 +64,21 @@ final class Contacts
         return $this->http->request('PATCH', self::path($addr), Util::body($fields, self::WIRE_MAP));
     }
 
-    /** @param string|array<string,mixed> $contact @return array<mixed> */
-    public function remove(string|array $contact): array
+    /**
+     * DELETE /contacts/:idOrEmail. The contact's emails stay in the send log;
+     * `erase => true` (`?erase=true`) also scrubs the address from email history,
+     * event payloads and API logs (a GDPR/LGPD erasure).
+     *
+     * @param string|array<string,mixed> $contact
+     * @param array{erase?: bool} $options
+     * @return array<mixed>
+     */
+    public function remove(string|array $contact, array $options = []): array
     {
-        return $this->http->request('DELETE', self::path(self::normalize($contact)));
+        // The API reads the literal `true`; http_build_query would render a bool as `1`.
+        $query = empty($options['erase']) ? [] : ['erase' => 'true'];
+
+        return $this->http->request('DELETE', self::path(self::normalize($contact)), null, $query);
     }
 
     /**

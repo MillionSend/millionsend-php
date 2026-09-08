@@ -165,7 +165,8 @@ $ms->contacts->create([
 $ms->contacts->get('ada@acme.dev');                         // by id or email
 $ms->contacts->update('ada@acme.dev', ['first_name' => null, 'unsubscribed' => true]); // null clears
 $ms->contacts->update(['id' => $id, 'last_name' => 'L']);   // single-array shape also works
-$ms->contacts->remove($id);
+$ms->contacts->remove($id);                                 // the contact's emails stay in the send log
+$ms->contacts->remove($id, ['erase' => true]);              // ?erase=true — also scrubs the address from email history, events and API logs (GDPR/LGPD)
 $ms->contacts->list(['limit' => 50]);
 $ms->contacts->list(['segment_id' => $segmentId]);          // GET /segments/:id/contacts
 // Bulk read (MillionSend extension): attach properties and topic subscriptions to every item,
@@ -208,8 +209,9 @@ $result = $ms->contacts->batch->get([$contactId, ['email' => 'ada@acme.dev']], [
 // $result['data'][]    = ['object' => 'contact', 'id' => …, 'email' => …, …, 'topics' => [...]]  the contacts found
 // $result['missing'][] = ['index' => 1, 'email' => '…']   request entries that matched nobody
 
-// Bulk delete (MillionSend extension) — exactly one of ids or emails, up to 1000
+// Bulk delete (MillionSend extension) — exactly one of ids or emails, up to 1000; their emails stay in the send log
 $ms->contacts->batch->remove(['ids' => [...]]);      // or ['emails' => [...]] (case-insensitive)
+$ms->contacts->batch->remove(['emails' => [...], 'erase' => true]);   // also scrubs the addresses from email history, events and API logs (GDPR/LGPD)
 // => ['data' => [['object' => 'contact', 'contact' => '…', 'deleted' => true], …]]  only the rows actually deleted
 ```
 

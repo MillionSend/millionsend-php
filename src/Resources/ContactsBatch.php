@@ -65,8 +65,10 @@ final class ContactsBatch
     /**
      * POST /contacts/batch/remove — by `ids` or by `emails` (exactly one, 1..1000).
      * Lists only the rows actually deleted; unknown ids/addresses are skipped.
+     * The contacts' emails stay in the send log; `erase => true` also scrubs the
+     * addresses from email history, event payloads and API logs (a GDPR/LGPD erasure).
      *
-     * @param array{ids?: list<string>, emails?: list<string>} $params
+     * @param array{ids?: list<string>, emails?: list<string>, erase?: bool} $params
      * @return array<mixed>
      */
     public function remove(array $params): array
