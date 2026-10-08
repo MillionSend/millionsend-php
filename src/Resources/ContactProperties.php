@@ -31,7 +31,10 @@ final class ContactProperties
         return $this->http->request('GET', '/contact-properties/' . rawurlencode($id));
     }
 
-    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /**
+     * @param array{limit?: int, after?: string, before?: string} $options
+     * @return array<mixed>
+     */
     public function list(array $options = []): array
     {
         return $this->http->request('GET', '/contact-properties', null, Util::listQuery($options));

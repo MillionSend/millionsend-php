@@ -29,13 +29,20 @@ final class Topics
         return $this->http->request('GET', '/topics/' . rawurlencode($id));
     }
 
-    /** GET /topics — a bare `{ data }` list (topics are unpaginated). @return array<mixed> */
+    /**
+     * GET /topics — a bare `{ data }` list (topics are unpaginated).
+     *
+     * @return array<mixed>
+     */
     public function list(): array
     {
         return $this->http->request('GET', '/topics');
     }
 
-    /** @param array{name?: string, description?: string, visibility?: string} $params @return array<mixed> */
+    /**
+     * @param array{name?: string, description?: string, visibility?: string} $params
+     * @return array<mixed>
+     */
     public function update(string $id, array $params): array
     {
         return $this->http->request('PATCH', '/topics/' . rawurlencode($id), Util::body($params, self::WIRE_MAP));

@@ -26,7 +26,10 @@ final class ApiKeys
         return $this->http->request('POST', '/api-keys', Util::body($params, self::WIRE_MAP));
     }
 
-    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /**
+     * @param array{limit?: int, after?: string, before?: string} $options
+     * @return array<mixed>
+     */
     public function list(array $options = []): array
     {
         return $this->http->request('GET', '/api-keys', null, Util::listQuery($options));

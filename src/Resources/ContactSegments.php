@@ -11,13 +11,21 @@ final class ContactSegments
 {
     public function __construct(private readonly HttpClient $http) {}
 
-    /** POST /contacts/:idOrEmail/segments/:segmentId @return array<mixed> */
+    /**
+     * POST /contacts/:idOrEmail/segments/:segmentId
+     *
+     * @return array<mixed>
+     */
     public function add(string $contact, string $segmentId): array
     {
         return $this->http->request('POST', self::path($contact, $segmentId));
     }
 
-    /** DELETE /contacts/:idOrEmail/segments/:segmentId @return array<mixed> */
+    /**
+     * DELETE /contacts/:idOrEmail/segments/:segmentId
+     *
+     * @return array<mixed>
+     */
     public function remove(string $contact, string $segmentId): array
     {
         return $this->http->request('DELETE', self::path($contact, $segmentId));

@@ -11,7 +11,11 @@ final class Usage
 {
     public function __construct(private readonly HttpClient $http) {}
 
-    /** GET /usage @return array<mixed> */
+    /**
+     * GET /usage
+     *
+     * @return array<mixed>
+     */
     public function get(): array
     {
         return $this->http->request('GET', '/usage');

@@ -15,7 +15,11 @@ final class Deliverability
 {
     public function __construct(private readonly HttpClient $http) {}
 
-    /** GET /deliverability @return array<mixed> */
+    /**
+     * GET /deliverability
+     *
+     * @return array<mixed>
+     */
     public function get(): array
     {
         return $this->http->request('GET', '/deliverability');

@@ -36,7 +36,10 @@ final class Domains
         return $this->http->request('GET', '/domains/' . rawurlencode($id));
     }
 
-    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /**
+     * @param array{limit?: int, after?: string, before?: string} $options
+     * @return array<mixed>
+     */
     public function list(array $options = []): array
     {
         return $this->http->request('GET', '/domains', null, Util::listQuery($options));
@@ -54,7 +57,11 @@ final class Domains
         return $this->http->request('PATCH', '/domains/' . rawurlencode($id), Util::body($params, self::WIRE_MAP));
     }
 
-    /** POST /domains/:id/verify — re-checks DNS and returns the domain. @return array<mixed> */
+    /**
+     * POST /domains/:id/verify — re-checks DNS and returns the domain.
+     *
+     * @return array<mixed>
+     */
     public function verify(string $id): array
     {
         return $this->http->request('POST', '/domains/' . rawurlencode($id) . '/verify');

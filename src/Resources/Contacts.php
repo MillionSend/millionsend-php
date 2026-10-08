@@ -41,7 +41,10 @@ final class Contacts
         return $this->http->request('POST', '/contacts', Util::body($params, self::WIRE_MAP));
     }
 
-    /** @param string|array<string,mixed> $contact @return array<mixed> */
+    /**
+     * @param string|array<string,mixed> $contact
+     * @return array<mixed>
+     */
     public function get(string|array $contact): array
     {
         return $this->http->request('GET', self::path(self::normalize($contact)));
@@ -137,7 +140,11 @@ final class Contacts
         return is_string($contact) ? ['id' => $contact] : $contact;
     }
 
-    /** Email wins over id. @param array<string,mixed> $addr */
+    /**
+     * Email wins over id.
+     *
+     * @param array<string,mixed> $addr
+     */
     private static function path(array $addr): string
     {
         return '/contacts/' . rawurlencode((string) ($addr['email'] ?? $addr['id'] ?? ''));
