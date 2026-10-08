@@ -31,13 +31,19 @@ final class Segments
         return $this->http->request('GET', '/segments/' . rawurlencode($id));
     }
 
-    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /**
+     * @param array{limit?: int, after?: string, before?: string} $options
+     * @return array<mixed>
+     */
     public function list(array $options = []): array
     {
         return $this->http->request('GET', '/segments', null, Util::listQuery($options));
     }
 
-    /** @param array{name?: string, filter?: array<string,mixed>|null} $params @return array<mixed> */
+    /**
+     * @param array{name?: string, filter?: array<string,mixed>|null} $params
+     * @return array<mixed>
+     */
     public function update(string $id, array $params): array
     {
         return $this->http->request('PATCH', '/segments/' . rawurlencode($id), Util::body($params));

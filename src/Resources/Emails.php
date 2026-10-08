@@ -59,7 +59,10 @@ final class Emails
         return $this->http->request('GET', '/emails/' . rawurlencode($id));
     }
 
-    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /**
+     * @param array{limit?: int, after?: string, before?: string} $options
+     * @return array<mixed>
+     */
     public function list(array $options = []): array
     {
         return $this->http->request('GET', '/emails', null, Util::listQuery($options));
@@ -87,13 +90,21 @@ final class Emails
         return $this->http->request('GET', '/emails/' . rawurlencode($id) . '/insights');
     }
 
-    /** POST /emails/:id/cancel — only scheduled, unsent emails. @return array<mixed> */
+    /**
+     * POST /emails/:id/cancel — only scheduled, unsent emails.
+     *
+     * @return array<mixed>
+     */
     public function cancel(string $id): array
     {
         return $this->http->request('POST', '/emails/' . rawurlencode($id) . '/cancel');
     }
 
-    /** DELETE /emails/:id (MillionSend extension). @return array<mixed> */
+    /**
+     * DELETE /emails/:id (MillionSend extension).
+     *
+     * @return array<mixed>
+     */
     public function remove(string $id): array
     {
         return $this->http->request('DELETE', '/emails/' . rawurlencode($id));

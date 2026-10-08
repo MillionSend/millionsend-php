@@ -31,7 +31,10 @@ final class Templates
         return $this->http->request('GET', '/templates/' . rawurlencode($idOrAlias));
     }
 
-    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /**
+     * @param array{limit?: int, after?: string, before?: string} $options
+     * @return array<mixed>
+     */
     public function list(array $options = []): array
     {
         return $this->http->request('GET', '/templates', null, Util::listQuery($options));
@@ -65,7 +68,11 @@ final class Templates
         return $this->http->request('POST', '/templates/' . rawurlencode($idOrAlias) . '/publish');
     }
 
-    /** POST /templates/:idOrAlias/duplicate @return array<mixed> */
+    /**
+     * POST /templates/:idOrAlias/duplicate
+     *
+     * @return array<mixed>
+     */
     public function duplicate(string $idOrAlias): array
     {
         return $this->http->request('POST', '/templates/' . rawurlencode($idOrAlias) . '/duplicate');

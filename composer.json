@@ -15,13 +15,20 @@
         "guzzlehttp/guzzle": "^7.5"
     },
     "require-dev": {
-        "pestphp/pest": "^2.34"
+        "laravel/pint": "1.30.4",
+        "pestphp/pest": "^2.34",
+        "phpstan/phpstan": "2.2.15"
     },
     "autoload": {
         "psr-4": { "MillionSend\\": "src/" }
     },
     "scripts": {
-        "test": "pest"
+        "test": "pest",
+        "lint": [
+            "pint --test",
+            "phpstan analyse"
+        ],
+        "lint:fix": "pint"
     },
     "config": {
         "allow-plugins": { "pestphp/pest-plugin": true },

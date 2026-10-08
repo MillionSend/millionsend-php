@@ -37,7 +37,10 @@ final class Broadcasts
         return $this->http->request('GET', '/broadcasts/' . rawurlencode($id));
     }
 
-    /** @param array{limit?: int, after?: string, before?: string} $options @return array<mixed> */
+    /**
+     * @param array{limit?: int, after?: string, before?: string} $options
+     * @return array<mixed>
+     */
     public function list(array $options = []): array
     {
         return $this->http->request('GET', '/broadcasts', null, Util::listQuery($options));
@@ -54,7 +57,11 @@ final class Broadcasts
         return $this->http->request('PATCH', '/broadcasts/' . rawurlencode($id), Util::body($params, self::WIRE_MAP));
     }
 
-    /** DELETE — draft only. @return array<mixed> */
+    /**
+     * DELETE — draft only.
+     *
+     * @return array<mixed>
+     */
     public function remove(string $id): array
     {
         return $this->http->request('DELETE', '/broadcasts/' . rawurlencode($id));
@@ -71,7 +78,11 @@ final class Broadcasts
         return $this->http->request('POST', '/broadcasts/' . rawurlencode($id) . '/send', Util::body($options, self::WIRE_MAP));
     }
 
-    /** POST /broadcasts/:id/cancel — scheduled only. @return array<mixed> */
+    /**
+     * POST /broadcasts/:id/cancel — scheduled only.
+     *
+     * @return array<mixed>
+     */
     public function cancel(string $id): array
     {
         return $this->http->request('POST', '/broadcasts/' . rawurlencode($id) . '/cancel');
