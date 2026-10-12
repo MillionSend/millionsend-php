@@ -48,9 +48,10 @@ final class Domains
 
     /**
      * PATCH /domains/:id — `trackingSubdomain => null` clears it;
-     * `receivingCatchAll` accepts mail for addresses without an inbox (a paid
-     * plan on Cloud). resend-php's `tls` and `capabilities` pass through; the
-     * server answers 422 for them.
+     * `capabilities => ['receiving' => 'enabled']` turns receiving on (a verified
+     * domain); `receivingCatchAll` accepts mail for addresses without an inbox (a
+     * paid plan on Cloud). resend-php's `tls` passes through; the server answers
+     * 422 for it.
      *
      * @param array{openTracking?: bool, clickTracking?: bool, trackingSubdomain?: string|null, receivingCatchAll?: bool, tls?: mixed, capabilities?: mixed} $params
      * @return array<mixed>

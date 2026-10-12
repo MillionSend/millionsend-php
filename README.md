@@ -85,7 +85,7 @@ the same exception with `getStatusCode()` returning `null`.
 `emails->send()` and `batch->send()` throw a 422 `all_recipients_suppressed` when every
 `to` recipient is on the suppression list or has opted out of the send's `topic_id`.
 
-Inboxes add `inbox_send_policy` (403, a send the inbox's rules hold),
+Inboxes add `inbox_send_policy` (403, a send the inbox's rules refuse; one they hold is a 202 draft),
 `inbox_send_cap_reached` (429, the inbox's daily cap), `approval_required` (403),
 `email_quarantined` (403), `email_blocked` (410, a download of an email that carries
 malware) and `too_many_waits` (429, too many concurrent long-polls).
@@ -422,6 +422,7 @@ $ms->domains->list();
 $ms->domains->get($id);
 $ms->domains->verify($id);             // re-check DNS
 $ms->domains->update($id, ['open_tracking' => false, 'tracking_subdomain' => null]);
+$ms->domains->update($id, ['capabilities' => ['receiving' => 'enabled']]); // receive mail (verified domains)
 $ms->domains->update($id, ['receiving_catch_all' => true]); // accept mail for addresses without an inbox
 $ms->domains->remove($id);
 ```
@@ -538,7 +539,7 @@ match `resend-php`; snake_case payloads pass through to the wire untouched. Note
   `share()`/`metrics()`, `->emails->attachments`, `->webhooks->events`
   and the local `verify()` helper, `->domains->claims`, `->broadcasts->recipients()`
   /`->clickedLinks`, `->apiKeys->update()`, and the `->events`/`->logs`/`->automations`
-  services. Domain `tls`/`capabilities` pass through and are answered with 422.
+  services. Domain `tls` passes through and is answered with 422.
 - **MillionSend extensions** (no Resend counterpart): segment `filter`,
   `->contacts->batch`, `->contacts->preferencesLink()`, `->webhooks->rotate()`,
   `->emails->getInsights()`, `->emails->remove()`,

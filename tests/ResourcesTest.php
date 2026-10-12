@@ -1276,18 +1276,22 @@ describe('inboxes', function () {
         $base = '/inboxes/' . INBOX_ID . '/threads/' . THREAD_ID . '/emails';
         [$ms, $spy] = fakeClient(200, sentEmailFixture());
 
-        $ms->inboxes->threads->emails->list(INBOX_ID, THREAD_ID, ['after' => EMAIL_ID]);
+        $ms->inboxes->threads->emails->list(INBOX_ID, THREAD_ID, ['after' => EMAIL_ID, 'includeQuarantined' => true]);
         expect($spy->at(0)->getUri()->getPath())->toBe($base);
-        expect(queryOf($spy->at(0)))->toBe(['after' => EMAIL_ID]);
+        expect(queryOf($spy->at(0)))->toBe(['after' => EMAIL_ID, 'include_quarantined' => 'true']);
 
         $ms->inboxes->threads->emails->get(INBOX_ID, THREAD_ID, EMAIL_ID);
         expect($spy->at(1)->getUri()->getPath())->toBe($base . '/' . EMAIL_ID);
+        expect($spy->at(1)->getUri()->getQuery())->toBe('');
+
+        $ms->inboxes->threads->emails->get(INBOX_ID, THREAD_ID, EMAIL_ID, ['include_quarantined' => true]);
+        expect(queryOf($spy->at(2)))->toBe(['include_quarantined' => 'true']);
 
         $res = $ms->inboxes->threads->emails->reply(INBOX_ID, THREAD_ID, EMAIL_ID, ['text' => 'Done.', 'replyAll' => true], ['idempotencyKey' => 'r-1']);
-        expect($spy->at(2)->getMethod())->toBe('POST');
-        expect($spy->at(2)->getUri()->getPath())->toBe($base . '/' . EMAIL_ID . '/reply');
-        expect(bodyOf($spy->at(2)))->toBe(['text' => 'Done.', 'reply_all' => true]);
-        expect($spy->at(2)->getHeaderLine('Idempotency-Key'))->toBe('r-1');
+        expect($spy->at(3)->getMethod())->toBe('POST');
+        expect($spy->at(3)->getUri()->getPath())->toBe($base . '/' . EMAIL_ID . '/reply');
+        expect(bodyOf($spy->at(3)))->toBe(['text' => 'Done.', 'reply_all' => true]);
+        expect($spy->at(3)->getHeaderLine('Idempotency-Key'))->toBe('r-1');
         expect($res)->toBe(['kind' => 'sent', 'email' => sentEmailFixture()]);
 
         [$held, $spy] = fakeClient(202, draftFixture());

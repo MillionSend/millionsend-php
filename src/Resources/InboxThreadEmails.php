@@ -14,8 +14,9 @@ final class InboxThreadEmails
 
     /**
      * GET /inboxes/:id/threads/:threadId/emails — oldest first; `after` pages toward newer.
+     * `includeQuarantined` also lists held messages (full-access team keys only).
      *
-     * @param array{limit?: int, after?: string, before?: string} $options
+     * @param array{limit?: int, after?: string, before?: string, includeQuarantined?: bool, include_quarantined?: bool} $options
      * @return array<mixed>
      */
     public function list(string $inboxId, string $threadId, array $options = []): array
@@ -24,14 +25,25 @@ final class InboxThreadEmails
             'GET',
             Util::path('inboxes', $inboxId, 'threads', $threadId, 'emails'),
             null,
-            Util::listQuery($options),
+            Util::query($options, Receiving::WIRE_MAP),
         );
     }
 
-    /** @return array<mixed> */
-    public function get(string $inboxId, string $threadId, string $emailId): array
+    /**
+     * GET /inboxes/:id/threads/:threadId/emails/:emailId — `includeQuarantined`
+     * reads a held message (full-access team keys only).
+     *
+     * @param array{includeQuarantined?: bool, include_quarantined?: bool} $options
+     * @return array<mixed>
+     */
+    public function get(string $inboxId, string $threadId, string $emailId, array $options = []): array
     {
-        return $this->http->request('GET', Util::path('inboxes', $inboxId, 'threads', $threadId, 'emails', $emailId));
+        return $this->http->request(
+            'GET',
+            Util::path('inboxes', $inboxId, 'threads', $threadId, 'emails', $emailId),
+            null,
+            Util::query($options, Receiving::WIRE_MAP),
+        );
     }
 
     /**
