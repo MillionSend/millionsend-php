@@ -151,6 +151,25 @@ describe('request wiring', function () {
         expect($spy->last()->getHeaderLine('Idempotency-Key'))->toBe('');
     });
 
+    it('stretches the deadline past a long-poll wait', function () {
+        $timeouts = [];
+        $handler = function (Psr\Http\Message\RequestInterface $request, array $options) use (&$timeouts): GuzzleHttp\Promise\PromiseInterface {
+            $timeouts[] = $options['timeout'];
+
+            return new GuzzleHttp\Promise\FulfilledPromise(new GuzzleHttp\Psr7\Response(200, [], '{}'));
+        };
+        $ms = MillionSend::client('ms_test', 'https://api.test', [
+            'client' => new GuzzleHttp\Client(['handler' => $handler]),
+            'timeout' => 5.0,
+        ]);
+
+        $ms->emails->receiving->list();
+        $ms->emails->receiving->list(['wait' => 45]);
+        $ms->inboxes->codes->latest('ib1', ['wait' => 1]);
+
+        expect($timeouts)->toBe([5.0, 55.0, 11.0]);
+    });
+
     it('returns the decoded body on 2xx', function () {
         [$ms] = fakeClient(200, ['id' => 'abc']);
         $res = $ms->emails->send(['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => 's', 'text' => 't']);
@@ -269,6 +288,6 @@ describe('wire body completeness', function () {
         [$ms, $spy] = fakeClient();
         $ms->emails->get('e1');
 
-        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.8.0');
+        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.9.0');
     });
 });

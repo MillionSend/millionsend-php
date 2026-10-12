@@ -12,6 +12,7 @@ use MillionSend\Resources\Contacts;
 use MillionSend\Resources\Deliverability;
 use MillionSend\Resources\Domains;
 use MillionSend\Resources\Emails;
+use MillionSend\Resources\Inboxes;
 use MillionSend\Resources\Segments;
 use MillionSend\Resources\Suppressions;
 use MillionSend\Resources\Templates;
@@ -27,6 +28,7 @@ final class Client
 {
     public readonly Emails $emails;
     public readonly Batch $batch;
+    public readonly Inboxes $inboxes;
     public readonly Contacts $contacts;
     public readonly ContactProperties $contactProperties;
     public readonly Topics $topics;
@@ -45,6 +47,7 @@ final class Client
     {
         $this->emails = new Emails($http);
         $this->batch = new Batch($http);
+        $this->inboxes = new Inboxes($http);
         $this->contacts = new Contacts($http);
         $this->contactProperties = new ContactProperties($http);
         $this->topics = new Topics($http);

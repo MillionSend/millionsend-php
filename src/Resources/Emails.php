@@ -20,7 +20,12 @@ final class Emails
         'topicId' => 'topic_id',
     ];
 
-    public function __construct(private readonly HttpClient $http) {}
+    public readonly Receiving $receiving;
+
+    public function __construct(private readonly HttpClient $http)
+    {
+        $this->receiving = new Receiving($http);
+    }
 
     /**
      * POST /emails. Options: `idempotencyKey` (or resend-php's `idempotency_key`).

@@ -10,14 +10,15 @@ use MillionSend\Util;
 /** Webhook endpoints. `get` and `rotate` are the only calls that return the `signing_secret`. */
 final class Webhooks
 {
-    private const WIRE_MAP = ['signingSecret' => 'signing_secret', 'overlapHours' => 'overlap_hours'];
+    private const WIRE_MAP = ['signingSecret' => 'signing_secret', 'overlapHours' => 'overlap_hours', 'inboxIds' => 'inbox_ids'];
 
     public function __construct(private readonly HttpClient $http) {}
 
     /**
-     * POST /webhooks — omit `signingSecret` to have one generated.
+     * POST /webhooks — omit `signingSecret` to have one generated. `inboxIds`
+     * limits inbox events and `email.received` to those inboxes (null = every inbox).
      *
-     * @param array{endpoint: string, events: list<string>, signingSecret?: string} $params
+     * @param array{endpoint: string, events: list<string>, signingSecret?: string, inboxIds?: list<string>|null} $params
      * @return array<mixed>
      */
     public function create(array $params): array
@@ -54,7 +55,7 @@ final class Webhooks
     }
 
     /**
-     * @param array{endpoint?: string, events?: list<string>, status?: string} $params
+     * @param array{endpoint?: string, events?: list<string>, status?: string, inboxIds?: list<string>|null} $params
      * @return array<mixed>
      */
     public function update(string $id, array $params): array

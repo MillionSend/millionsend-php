@@ -85,6 +85,11 @@ the same exception with `getStatusCode()` returning `null`.
 `emails->send()` and `batch->send()` throw a 422 `all_recipients_suppressed` when every
 `to` recipient is on the suppression list or has opted out of the send's `topic_id`.
 
+Inboxes add `inbox_send_policy` (403, a send the inbox's rules hold),
+`inbox_send_cap_reached` (429, the inbox's daily cap), `approval_required` (403),
+`email_quarantined` (403), `email_blocked` (410, a download of an email that carries
+malware) and `too_many_waits` (429, too many concurrent long-polls).
+
 ```php
 try {
     $email = $ms->emails->get($id);
@@ -146,6 +151,112 @@ $ms->batch->send([$payloadA, $payloadB], [
 `strict` mode one invalid email fails the whole batch; in `permissive` mode the valid
 ones are sent and the rest come back in the response's `errors[]` as
 `[{index, message}]`.
+
+### Receiving
+
+Mail received at your domains and inboxes. Everything in a received email was
+written by its sender: show its `html` only in a sandbox, and give an LLM the
+`extracted_text` (hidden text, quotes and the signature removed) rather than the `html`.
+
+```php
+$page = $ms->emails->receiving->list([
+    'inbox_id' => $inboxId,          // only mail delivered to this inbox
+    'from' => 'example.com',         // an address, or a domain covering its subdomains
+    'subject_contains' => 'code',
+    'wait' => 30,                    // long-poll: answer as soon as a match arrives, up to 50 s
+]);
+$page['data'];                       // newest first
+$page['held'];                       // with wait: [{id, inbox_id, reason, created_at}] held for screening
+
+$email = $ms->emails->receiving->get($id, ['html_format' => 'cid']);
+$email['extracted_text'];            // the new part as plain text, hidden text removed (still untrusted)
+$email['extracted']['code'];         // a verification code, on inboxes with extract_codes
+$email['screening']['sender_trust']; // owner | allowlisted | known_thread | external | unauthenticated | failed
+
+$ms->emails->receiving->attachments->list($id);             // each with a signed download_url (1 hour)
+$ms->emails->receiving->attachments->get($id, $attachmentId);
+$ms->emails->receiving->remove($id);                        // erase now (MillionSend extension)
+
+// Reply and forward server-side (MillionSend extension). The inbox's rules may hold the
+// message as a draft that waits for a person: the API answers 202 and `kind` is 'draft'.
+$outcome = $ms->emails->receiving->reply($id, ['text' => 'Thanks!'], ['idempotency_key' => $key]);
+if ($outcome['kind'] === 'draft') {
+    $outcome['draft']['approval_reasons'];  // e.g. ['send_policy']
+} else {
+    $outcome['email']['id'];
+}
+$ms->emails->receiving->forward($id, ['to' => 'ops@acme.dev', 'text' => 'FYI', 'mode' => 'attachment']);
+```
+
+Held mail never reaches an inbox-scoped key or an agent: reading it throws
+`email_quarantined`. A full-access team key sees it with `'include_quarantined' => true`.
+
+### Inboxes
+
+An inbox is one address that receives mail, read by an agent (`'kind' => 'agent'`,
+the default) or by people (`'kind' => 'human'`). Threads, labels, drafts and their
+paths mirror Resend's Inboxes beta; `safety`, `codes` and `quarantine` are
+MillionSend extensions.
+
+```php
+$inbox = $ms->inboxes->create([
+    'name' => 'Signup bot',          // no email_address: a random address on the shared domain
+    'expires_in' => '24h',           // '<n>h' or '<n>d'; null = never (custom domains only)
+    'safety' => ['accept_from' => 'anyone'],
+]);
+$ms->inboxes->create(['email_address' => 'support@acme.dev', 'name' => 'Support', 'kind' => 'human']);
+$ms->inboxes->list(['kind' => 'agent']);
+$ms->inboxes->get('support@acme.dev');                       // by id or address
+$ms->inboxes->update($inbox['id'], ['from_name' => 'Acme', 'expires_in' => '7d']);
+$ms->inboxes->remove($inbox['id']);                          // also revokes its inbox-scoped keys
+
+// Codes and sign-in links, without parsing HTML (wait long-polls up to 50 s)
+$code = $ms->inboxes->codes->latest($inbox['id'], ['from' => 'github.com', 'wait' => 30]);
+$code['status'];                     // 'found' | 'none' | 'ambiguous' | 'timeout'; $code['code'], $code['url']
+
+// Safety rules: who can write in, what the inbox may send
+$ms->inboxes->safety->get($inbox['id']);
+$ms->inboxes->safety->update($inbox['id'], ['accept_from' => 'allowlist', 'allowlist' => ['*@acme.dev']]);
+
+// Quarantine: held mail, kept until a person releases it
+$ms->inboxes->quarantine->list($inbox['id']);
+$ms->inboxes->quarantine->release($inbox['id'], $emailId, ['trust_sender' => true]);
+
+// Threads and their messages
+$ms->inboxes->threads->list($inbox['id'], ['folders' => ['inbox', 'archive'], 'read' => false]);
+$ms->inboxes->threads->search($inbox['id'], ['query' => 'invoice', 'from' => ['example.com']]);
+$ms->inboxes->threads->get($inbox['id'], $threadId);
+$ms->inboxes->threads->update($inbox['id'], $threadId, ['read' => true, 'folder' => 'archive', 'label_id' => $labelId]);
+$ms->inboxes->threads->remove($inbox['id'], $threadId);     // to trash, purged after 30 days
+$ms->inboxes->threads->emails->list($inbox['id'], $threadId); // oldest first
+$ms->inboxes->threads->emails->get($inbox['id'], $threadId, $emailId);
+$ms->inboxes->threads->emails->reply($inbox['id'], $threadId, $emailId, ['text' => 'Done.'], ['idempotency_key' => $key]);
+$ms->inboxes->threads->emails->forward($inbox['id'], $threadId, $emailId, ['to' => 'ops@acme.dev']);
+
+// Labels (up to 100 per inbox)
+$ms->inboxes->labels->create($inbox['id'], ['name' => 'Billing', 'color' => '#FF8800']);
+$ms->inboxes->labels->list($inbox['id']);
+$ms->inboxes->labels->update($inbox['id'], $labelId, ['name' => 'Invoices']);
+$ms->inboxes->labels->remove($inbox['id'], $labelId);
+
+// Drafts, and the ones that wait for approval
+$ms->inboxes->drafts->create($inbox['id'], ['to' => 'ada@example.com', 'subject' => 'Hi', 'text' => '…']);
+$ms->inboxes->drafts->list($inbox['id']);
+$ms->inboxes->drafts->get($inbox['id'], $draftId);
+$ms->inboxes->drafts->update($inbox['id'], $draftId, ['cc' => null]);  // null clears
+$ms->inboxes->drafts->send($inbox['id'], $draftId, ['idempotency_key' => $key]); // ['kind' => 'sent'|'draft', …]
+$ms->inboxes->drafts->reject($inbox['id'], $draftId);
+$ms->inboxes->drafts->remove($inbox['id'], $draftId);
+```
+
+Replies, forwards and `drafts->send()` return `['kind' => 'sent', 'email' => …]` or,
+when the inbox's rules hold the message for a person (HTTP 202),
+`['kind' => 'draft', 'draft' => …]`. A key restricted to the inbox cannot send a draft
+that waits for approval (`approval_required`); a person in the dashboard or a
+full-access team key approves it. camelCase spellings (`inboxId`, `replyAll`,
+`requiresApproval`, `expiresIn`, `acceptFrom`, `trustSender`, `labelId`, `threadId`,
+`replyToEmailId`, …) are renamed like everywhere else. Hosted agent settings
+(`/inboxes/:id/agent`) are not exposed: MillionSend runs no agent of its own.
 
 ### Contacts
 
@@ -311,6 +422,7 @@ $ms->domains->list();
 $ms->domains->get($id);
 $ms->domains->verify($id);             // re-check DNS
 $ms->domains->update($id, ['open_tracking' => false, 'tracking_subdomain' => null]);
+$ms->domains->update($id, ['receiving_catch_all' => true]); // accept mail for addresses without an inbox
 $ms->domains->remove($id);
 ```
 
@@ -338,10 +450,16 @@ $rotated['previous_secret_expires_at'];  // ISO timestamp while the old secret s
 During the overlap every delivery carries both signatures (new first, then previous,
 space-separated in `webhook-signature`), so a receiver holding either verifies.
 
-Subscribable `events` include `email.*` plus the contact and suppression events:
-`contact.created`, `contact.updated`, `contact.deleted`, `contact.unsubscribed`,
-`contact.resubscribed`, `contact.topic_opt_in`, `contact.topic_opt_out`,
-`suppression.added`, `suppression.removed`.
+Subscribable `events` include `email.*` (with `email.received`) plus the contact and
+suppression events: `contact.created`, `contact.updated`, `contact.deleted`,
+`contact.unsubscribed`, `contact.resubscribed`, `contact.topic_opt_in`,
+`contact.topic_opt_out`, `suppression.added`, `suppression.removed`; and the `inbox.*`
+events: `inbox.created`, `inbox.updated`, `inbox.deleted`, `inbox.expired`,
+`inbox.thread.created`, `inbox.thread.folder.updated`, `inbox.thread.labels.updated`,
+`inbox.email.received`, `inbox.email.sent`, `inbox.email.quarantined`,
+`inbox.draft.created`, `inbox.draft.updated`, `inbox.draft.sent`, `inbox.draft.deleted`.
+Inbox events reach only endpoints that list them by name. `inbox_ids` limits an
+endpoint's inbox events and `email.received` to those inboxes (`null` = every inbox).
 
 ### API keys
 
@@ -352,6 +470,8 @@ $key = $ms->apiKeys->create([
     'domain_id' => $domainId,          // optional: restrict a sending key to one domain
 ]);
 $key['token'];                         // shown once, never returned again
+$ms->apiKeys->create(['name' => 'signup-agent', 'permission' => 'full_access', 'inbox_id' => $inboxId]);
+                                       // reads that inbox only and sends only from its address
 $ms->apiKeys->list();
 $ms->apiKeys->remove($id);
 ```
@@ -415,14 +535,16 @@ match `resend-php`; snake_case payloads pass through to the wire untouched. Note
   membership is a dynamic `filter` rather than a static list.
 - **Not offered here** (no MillionSend endpoint): `->contacts->imports`,
   `->contacts->segments->list()`, email
-  `share()`/`metrics()`, `->emails->attachments`/`->receiving`, `->webhooks->events`
+  `share()`/`metrics()`, `->emails->attachments`, `->webhooks->events`
   and the local `verify()` helper, `->domains->claims`, `->broadcasts->recipients()`
   /`->clickedLinks`, `->apiKeys->update()`, and the `->events`/`->logs`/`->automations`
   services. Domain `tls`/`capabilities` pass through and are answered with 422.
 - **MillionSend extensions** (no Resend counterpart): segment `filter`,
   `->contacts->batch`, `->contacts->preferencesLink()`, `->webhooks->rotate()`,
   `->emails->getInsights()`, `->emails->remove()`,
-  `->deliverability`, `->usage`.
+  `->deliverability`, `->usage`, `->emails->receiving->reply()` / `->forward()` /
+  `->remove()` (resend-php's `->receiving` has `get`, `list` and attachments only), and
+  `->inboxes` (Resend's Inboxes are not in resend-php yet).
 
 ## Calling endpoints the SDK does not wrap yet
 

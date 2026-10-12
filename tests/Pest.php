@@ -71,3 +71,15 @@ function bodyOf(RequestInterface $request): mixed
 
     return $raw === '' ? null : json_decode($raw, true);
 }
+
+/**
+ * Decoded query string of a recorded request.
+ *
+ * @return array<string, mixed>
+ */
+function queryOf(RequestInterface $request): array
+{
+    parse_str($request->getUri()->getQuery(), $query);
+
+    return $query;
+}

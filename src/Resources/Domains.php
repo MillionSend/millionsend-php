@@ -15,6 +15,7 @@ final class Domains
         'openTracking' => 'open_tracking',
         'clickTracking' => 'click_tracking',
         'trackingSubdomain' => 'tracking_subdomain',
+        'receivingCatchAll' => 'receiving_catch_all',
     ];
 
     public function __construct(private readonly HttpClient $http) {}
@@ -46,10 +47,12 @@ final class Domains
     }
 
     /**
-     * PATCH /domains/:id — `trackingSubdomain => null` clears it. resend-php's
-     * `tls` and `capabilities` pass through; the server answers 422 for them.
+     * PATCH /domains/:id — `trackingSubdomain => null` clears it;
+     * `receivingCatchAll` accepts mail for addresses without an inbox (a paid
+     * plan on Cloud). resend-php's `tls` and `capabilities` pass through; the
+     * server answers 422 for them.
      *
-     * @param array{openTracking?: bool, clickTracking?: bool, trackingSubdomain?: string|null, tls?: mixed, capabilities?: mixed} $params
+     * @param array{openTracking?: bool, clickTracking?: bool, trackingSubdomain?: string|null, receivingCatchAll?: bool, tls?: mixed, capabilities?: mixed} $params
      * @return array<mixed>
      */
     public function update(string $id, array $params): array
