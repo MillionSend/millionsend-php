@@ -203,6 +203,19 @@ describe('request wiring', function () {
         }
     });
 
+    it('never sends a path an empty, "." or ".." id would turn into another resource\'s', function () {
+        [$ms, $spy] = fakeClient();
+
+        expect(fn () => $ms->inboxes->labels->remove('inbox_1', '..'))
+            ->toThrow(InvalidArgumentException::class, 'empty, "." or ".."');
+        expect(fn () => $ms->inboxes->threads->remove('inbox_1', '.'))->toThrow(InvalidArgumentException::class);
+        expect(fn () => $ms->emails->get(''))->toThrow(InvalidArgumentException::class);
+        expect($spy->requests)->toBe([]);
+
+        $ms->inboxes->labels->remove('inbox_1', '...');
+        expect($spy->last()->getUri()->getPath())->toBe('/inboxes/inbox_1/labels/...');
+    });
+
     it('falls back to a generic error when the body is not the canonical shape', function () {
         [$ms] = fakeClient(500, 'gateway boom');
 

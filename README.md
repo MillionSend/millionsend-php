@@ -166,7 +166,7 @@ $page = $ms->emails->receiving->list([
     'wait' => 30,                    // long-poll: answer as soon as a match arrives, up to 50 s
 ]);
 $page['data'];                       // newest first
-$page['held'];                       // with wait: [{id, inbox_id, reason, created_at}] held for screening
+$page['held'];                       // with wait: [{id, inbox_id, reason, quarantine_reason, created_at}] held back
 
 $email = $ms->emails->receiving->get($id, ['html_format' => 'cid']);
 $email['extracted_text'];            // the new part as plain text, hidden text removed (still untrusted)

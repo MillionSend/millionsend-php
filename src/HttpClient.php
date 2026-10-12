@@ -110,6 +110,14 @@ final class HttpClient
         ?string $idempotencyKey,
         array $headers,
     ): array {
+        // URL normalization resolves an empty, "." or ".." segment away, so an id
+        // such as ".." would send the request to another resource
+        // (DELETE /inboxes/{id}/labels/.. deletes the inbox).
+        foreach (array_slice(explode('/', $path), 1) as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                throw new \InvalidArgumentException('An id in the request path is empty, "." or "..".');
+            }
+        }
         $headers = [
             'Authorization' => 'Bearer ' . $this->apiKey,
             'Accept' => 'application/json',
