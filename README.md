@@ -27,7 +27,7 @@ $ms = MillionSend::client('ms_123');                            // MillionSend C
 try {
     $email = $ms->emails->send([
         'from' => 'Acme <onboarding@acme.dev>',
-        'to' => 'delivered@resend.dev',
+        'to' => 'success@simulator.amazonses.com',
         'subject' => 'Hello from MillionSend',
         'html' => '<strong>It works!</strong>',
     ]);
