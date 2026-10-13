@@ -16,7 +16,7 @@ use GuzzleHttp\ClientInterface;
  * $ms = MillionSend::client('ms_123', 'https://mail.acme.dev');  // self-hosted
  * $sent = $ms->emails->send([
  *     'from' => 'Acme <onboarding@acme.dev>',
- *     'to' => 'delivered@resend.dev',
+ *     'to' => 'success@simulator.amazonses.com',
  *     'subject' => 'Hello',
  *     'html' => '<strong>it works</strong>',
  * ]);
