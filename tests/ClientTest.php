@@ -151,6 +151,25 @@ describe('request wiring', function () {
         expect($spy->last()->getHeaderLine('Idempotency-Key'))->toBe('');
     });
 
+    it('stretches the deadline past a long-poll wait', function () {
+        $timeouts = [];
+        $handler = function (Psr\Http\Message\RequestInterface $request, array $options) use (&$timeouts): GuzzleHttp\Promise\PromiseInterface {
+            $timeouts[] = $options['timeout'];
+
+            return new GuzzleHttp\Promise\FulfilledPromise(new GuzzleHttp\Psr7\Response(200, [], '{}'));
+        };
+        $ms = MillionSend::client('ms_test', 'https://api.test', [
+            'client' => new GuzzleHttp\Client(['handler' => $handler]),
+            'timeout' => 5.0,
+        ]);
+
+        $ms->emails->receiving->list();
+        $ms->emails->receiving->list(['wait' => 45]);
+        $ms->inboxes->codes->latest('ib1', ['wait' => 1]);
+
+        expect($timeouts)->toBe([5.0, 55.0, 11.0]);
+    });
+
     it('returns the decoded body on 2xx', function () {
         [$ms] = fakeClient(200, ['id' => 'abc']);
         $res = $ms->emails->send(['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => 's', 'text' => 't']);
@@ -181,7 +200,53 @@ describe('request wiring', function () {
             expect($e->getStatusCode())->toBeNull();
             expect($e->getErrorName())->toBe('application_error');
             expect($e->getMessage())->toContain('ECONNREFUSED');
+            expect($e->getRetryAfter())->toBeNull();
         }
+    });
+
+    it('reads retry-after in seconds, null without the header', function () {
+        $body = ['statusCode' => 503, 'name' => 'name_review_unavailable', 'message' => 'try again later'];
+        [$ms] = fakeClient(503, $body, headers: ['retry-after' => '300']);
+
+        expect(fn () => $ms->inboxes->create(['username' => 'acme-support']))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('name_review_unavailable');
+                expect($e->getStatusCode())->toBe(503);
+                expect($e->getRetryAfter())->toBe(300);
+            });
+
+        [$ms] = fakeClient(503, $body);
+        expect(fn () => $ms->inboxes->create(['username' => 'acme-support']))
+            ->toThrow(fn (ErrorException $e) => expect($e->getRetryAfter())->toBeNull());
+    });
+
+    it('a JSON 404 for an unknown route is not_found; an older server\'s plain-text 404 is application_error', function () {
+        [$ms] = fakeClient(404, ['statusCode' => 404, 'name' => 'not_found', 'message' => 'The requested endpoint does not exist.']);
+        expect(fn () => $ms->http->request('GET', '/no-such-route'))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('not_found');
+                expect($e->getStatusCode())->toBe(404);
+            });
+
+        [$ms] = fakeClient(404, '404 Not Found', headers: ['Content-Type' => 'text/plain']);
+        expect(fn () => $ms->http->request('GET', '/no-such-route'))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('application_error');
+                expect($e->getStatusCode())->toBe(404);
+            });
+    });
+
+    it('never sends a path an empty, "." or ".." id would turn into another resource\'s', function () {
+        [$ms, $spy] = fakeClient();
+
+        expect(fn () => $ms->inboxes->labels->remove('inbox_1', '..'))
+            ->toThrow(InvalidArgumentException::class, 'empty, "." or ".."');
+        expect(fn () => $ms->inboxes->threads->remove('inbox_1', '.'))->toThrow(InvalidArgumentException::class);
+        expect(fn () => $ms->emails->get(''))->toThrow(InvalidArgumentException::class);
+        expect($spy->requests)->toBe([]);
+
+        $ms->inboxes->labels->remove('inbox_1', '...');
+        expect($spy->last()->getUri()->getPath())->toBe('/inboxes/inbox_1/labels/...');
     });
 
     it('falls back to a generic error when the body is not the canonical shape', function () {
@@ -269,6 +334,6 @@ describe('wire body completeness', function () {
         [$ms, $spy] = fakeClient();
         $ms->emails->get('e1');
 
-        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.8.0');
+        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.9.0');
     });
 });

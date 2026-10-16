@@ -10,15 +10,18 @@ use MillionSend\Util;
 /** API keys. The `token` is returned once, by `create`, and never again. */
 final class ApiKeys
 {
-    private const WIRE_MAP = ['domainId' => 'domain_id'];
+    private const WIRE_MAP = ['domainId' => 'domain_id', 'inboxId' => 'inbox_id'];
 
     public function __construct(private readonly HttpClient $http) {}
 
     /**
      * POST /api-keys — `permission` is full_access (default) or sending_access;
-     * `domainId` restricts a sending key to one domain.
+     * `domainId` restricts a sending key to one of the team's own domains (a
+     * `shared: false` row of GET /domains; the shared row's id answers 422);
+     * `inboxId` restricts a full_access key to one inbox (it reads that inbox and
+     * sends only from it).
      *
-     * @param array{name: string, permission?: string, domainId?: string|null} $params
+     * @param array{name: string, permission?: string, domainId?: string|null, inboxId?: string|null} $params
      * @return array<mixed>
      */
     public function create(array $params): array

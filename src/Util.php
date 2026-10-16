@@ -78,6 +78,39 @@ final class Util
     }
 
     /**
+     * Query params passed through like a body: camelCase aliases renamed, every
+     * other key kept. Booleans go out as "true"/"false" (Guzzle would send 1/0),
+     * lists comma-separated, and null or empty values stay off (`labels=` is not
+     * "no labels").
+     *
+     * @param array<string,mixed>  $options
+     * @param array<string,string> $aliases
+     * @return array<string,scalar>
+     */
+    public static function query(array $options, array $aliases = []): array
+    {
+        $out = [];
+        foreach (self::rename($options, $aliases) as $key => $value) {
+            if (is_bool($value)) {
+                $value = $value ? 'true' : 'false';
+            } elseif (is_array($value)) {
+                $value = implode(',', $value);
+            }
+            if (is_scalar($value) && $value !== '') {
+                $out[$key] = $value;
+            }
+        }
+
+        return $out;
+    }
+
+    /** `/a/b/…` with every segment percent-encoded (the literal ones are plain words). */
+    public static function path(string ...$segments): string
+    {
+        return '/' . implode('/', array_map(rawurlencode(...), $segments));
+    }
+
+    /**
      * Keyset list params (limit/after/before, plus any $extra filter keys),
      * dropping any that are unset.
      *

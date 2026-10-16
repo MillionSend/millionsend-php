@@ -15,7 +15,10 @@ use MillionSend\Exceptions\ErrorException;
  */
 final class HttpClient
 {
-    public const VERSION = '0.8.0';
+    public const VERSION = '0.9.0';
+
+    /** Seconds a long-poll answer may take to arrive after the server's own `wait` deadline. */
+    private const LONG_POLL_MARGIN = 10.0;
 
     private readonly string $baseUrl;
     private readonly string $userAgent;
@@ -72,6 +75,49 @@ final class HttpClient
         ?string $idempotencyKey = null,
         array $headers = [],
     ): array {
+        return $this->send($method, $path, $body, $query, $idempotencyKey, $headers)[1];
+    }
+
+    /**
+     * POST a send a person may have to approve (replies, forwards, draft sends):
+     * `['kind' => 'sent', 'email' => …]`, or on an HTTP 202
+     * `['kind' => 'draft', 'draft' => …]`, the draft the API held for approval.
+     *
+     * @param array<mixed>|object|null $body
+     * @param array<string,string>     $headers
+     * @return array{kind: 'sent', email: array<mixed>}|array{kind: 'draft', draft: array<mixed>}
+     * @throws ErrorException
+     */
+    public function requestOutcome(string $path, array|object|null $body = null, array $headers = []): array
+    {
+        [$status, $data] = $this->send('POST', $path, $body, [], null, $headers);
+
+        return $status === 202 ? ['kind' => 'draft', 'draft' => $data] : ['kind' => 'sent', 'email' => $data];
+    }
+
+    /**
+     * @param array<mixed>|object|null $body
+     * @param array<string,scalar>     $query
+     * @param array<string,string>     $headers
+     * @return array{0: int, 1: array<mixed>}
+     * @throws ErrorException
+     */
+    private function send(
+        string $method,
+        string $path,
+        array|object|null $body,
+        array $query,
+        ?string $idempotencyKey,
+        array $headers,
+    ): array {
+        // URL normalization resolves an empty, "." or ".." segment away, so an id
+        // such as ".." would send the request to another resource
+        // (DELETE /inboxes/{id}/labels/.. deletes the inbox).
+        foreach (array_slice(explode('/', $path), 1) as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                throw new \InvalidArgumentException('An id in the request path is empty, "." or "..".');
+            }
+        }
         $headers = [
             'Authorization' => 'Bearer ' . $this->apiKey,
             'Accept' => 'application/json',
@@ -83,10 +129,18 @@ final class HttpClient
             $headers['Idempotency-Key'] = $idempotencyKey;
         }
 
+        $timeout = $this->timeout;
+        // A `wait` query asks the API to hold its answer up to that many seconds
+        // (long-poll), so the deadline has to outlast it.
+        $wait = $query['wait'] ?? null;
+        if (is_numeric($wait) && $wait > 0) {
+            $timeout = max($timeout, (float) $wait + self::LONG_POLL_MARGIN);
+        }
+
         $options = [
             'headers' => $headers,
             'http_errors' => false,
-            'timeout' => $this->timeout,
+            'timeout' => $timeout,
             'connect_timeout' => $this->connectTimeout,
         ];
         if ($query !== []) {
@@ -107,9 +161,11 @@ final class HttpClient
         $decoded = $raw === '' ? null : json_decode($raw, true);
 
         if ($status < 200 || $status >= 300) {
-            throw ErrorException::fromBody($decoded, $status);
+            $retryAfter = filter_var($response->getHeaderLine('retry-after'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+
+            throw ErrorException::fromBody($decoded, $status, $retryAfter === false ? null : $retryAfter);
         }
 
-        return is_array($decoded) ? $decoded : [];
+        return [$status, is_array($decoded) ? $decoded : []];
     }
 }

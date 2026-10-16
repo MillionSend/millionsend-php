@@ -7,7 +7,12 @@ namespace MillionSend\Resources;
 use MillionSend\HttpClient;
 use MillionSend\Util;
 
-/** Sending domains and their DNS records. */
+/**
+ * Sending domains and their DNS records. On an instance with a shared inbox
+ * domain, the team's subdomain of it is listed last with `shared: true` and its
+ * `sending_mode`; it is read-only (403 `forbidden`) and sends only from an
+ * inbox's own address, so pick sender domains among the `shared: false` rows.
+ */
 final class Domains
 {
     private const WIRE_MAP = [
@@ -15,6 +20,7 @@ final class Domains
         'openTracking' => 'open_tracking',
         'clickTracking' => 'click_tracking',
         'trackingSubdomain' => 'tracking_subdomain',
+        'receivingCatchAll' => 'receiving_catch_all',
     ];
 
     public function __construct(private readonly HttpClient $http) {}
@@ -46,10 +52,13 @@ final class Domains
     }
 
     /**
-     * PATCH /domains/:id — `trackingSubdomain => null` clears it. resend-php's
-     * `tls` and `capabilities` pass through; the server answers 422 for them.
+     * PATCH /domains/:id — `trackingSubdomain => null` clears it;
+     * `capabilities => ['receiving' => 'enabled']` turns receiving on (a verified
+     * domain); `receivingCatchAll` accepts mail for addresses without an inbox (a
+     * paid plan on Cloud). resend-php's `tls` passes through; the server answers
+     * 422 for it.
      *
-     * @param array{openTracking?: bool, clickTracking?: bool, trackingSubdomain?: string|null, tls?: mixed, capabilities?: mixed} $params
+     * @param array{openTracking?: bool, clickTracking?: bool, trackingSubdomain?: string|null, receivingCatchAll?: bool, tls?: mixed, capabilities?: mixed} $params
      * @return array<mixed>
      */
     public function update(string $id, array $params): array

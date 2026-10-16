@@ -78,12 +78,23 @@ Successful calls return the decoded JSON body as an associative array.
 
 Every non-2xx response throws `MillionSend\Exceptions\ErrorException`. Its
 `getErrorName()` is a stable snake_case code you can branch on
-(`validation_error`, `not_found`, `restricted_api_key`, `sending_paused`, `all_recipients_suppressed`, …).
+(`validation_error`, `not_found`, `forbidden`, `restricted_api_key`, `rate_limit_exceeded`,
+`sending_paused`, `all_recipients_suppressed`, …); the message is for people, so don't parse it.
+`getRetryAfter()` is the response's `retry-after` header in seconds, or `null` when it has none.
 Client-side and transport failures (a request that never reached the API) throw
 the same exception with `getStatusCode()` returning `null`.
 
 `emails->send()` and `batch->send()` throw a 422 `all_recipients_suppressed` when every
 `to` recipient is on the suppression list or has opted out of the send's `topic_id`.
+
+Inboxes add `inbox_send_policy` (403, a send the inbox's rules or the shared domain refuse; one they hold is a 202 draft),
+`inbox_send_cap_reached` (429, the inbox's daily cap, or the team's on the shared domain), `approval_required` (403),
+`email_quarantined` (403), `email_blocked` (410, a download of an email that carries
+malware), `too_many_waits` (429, too many concurrent long-polls) and
+`name_review_unavailable` (503, a name on the shared domain can't be reviewed right now; see [the shared domain](#the-shared-domain)).
+
+An unknown route answers 404 `not_found`. Servers before v0.13.0 answer it in plain text,
+which surfaces as `application_error` with status 404.
 
 ```php
 try {
@@ -91,8 +102,46 @@ try {
 } catch (ErrorException $e) {
     if ($e->getErrorName() === 'not_found') { /* … */ }
     // $e->getStatusCode(); // int, or null for transport failures
+    // $e->getRetryAfter(); // seconds from retry-after, or null
 }
 ```
+
+### Retries
+
+The SDK never retries on its own. Worth retrying after `getRetryAfter()` seconds: 503
+`name_review_unavailable`, 429 `too_many_waits`, and 429 `rate_limit_exceeded` when
+`getRetryAfter()` is at most 60 (the per-minute limits). Not worth retrying in the same
+process: 429 `inbox_send_cap_reached` and the daily name-review 429 (also
+`rate_limit_exceeded`, so check `getRetryAfter()`, not just the name), which both last
+until the next UTC midnight, and any 403, 404, 409 or 422. Retry sends, replies,
+forwards and `drafts->send()` with the same `idempotency_key`. A 202 draft is not a
+failure: never send it again.
+
+## Pagination
+
+Lists take an optional `limit` and at most one of `after` or `before` (an item id), and
+answer `['object' => 'list', 'has_more' => …, 'data' => […]]`. They are newest first,
+except threads (most recently active first), a thread's emails (oldest first), drafts
+(most recently updated first), a received email's attachments (in message order), and
+labels and topics, which are not paginated. `after` takes the last id of a page and
+moves toward older items; `before` takes the first id and moves toward newer ones, still
+newest first within the page. `has_more` refers to the direction you're moving in.
+
+To fetch what arrived since your last sync, start `before` at the newest id you have:
+
+```php
+$before = $newestStoredId;
+do {
+    $page = $ms->emails->list(['before' => $before, 'limit' => 100]);
+    // store $page['data']
+    $before = $page['data'][0]['id'] ?? null;
+} while ($page['has_more'] && $before !== null);
+```
+
+A cursor whose item was deleted answers 422 `validation_error` on the top-level lists and
+`emails->receiving->list()`, and 404 `not_found` on the inbox lists: start again without
+a cursor and stop at the ids you already have. Servers before v0.13.0 list oldest first;
+walking every page with `after` returns every item on both.
 
 ## Resources
 
@@ -112,6 +161,17 @@ Every send field is supported: `from`, `to`, `subject`, `html`, `text`, `cc`, `b
 `reply_to`, `scheduled_at`, `tags`, `topic_id`, `attachments`, `headers` and
 `template`. `to`/`cc`/`bcc`/`reply_to` accept a string or an array. Options:
 `idempotency_key` (or `idempotencyKey`) sets the `Idempotency-Key` header.
+
+`subject` takes up to 998 characters. A `to`, `cc` or `bcc` address whose domain can
+never receive mail (`example.com`, a reserved TLD such as `.test` or `.invalid`, or a
+TLD that doesn't exist) gets a 422 `validation_error`; to try sending without emailing
+anyone, send to `success@simulator.amazonses.com`.
+
+`from` can be an inbox's address on [the shared domain](#the-shared-domain) while its
+`sending_mode` is `open`: exactly the inbox's `email_address` (no +tag), with no display
+name or the inbox's `from_name`, at most 10 distinct recipients across `to`, `cc` and
+`bcc`, and no `reply_to`, `attachments`, `headers` or `scheduled_at`. A key restricted to
+one of your domains gets 403 `restricted_api_key` for such a send.
 
 ```php
 $ms->emails->send([
@@ -146,6 +206,176 @@ $ms->batch->send([$payloadA, $payloadB], [
 `strict` mode one invalid email fails the whole batch; in `permissive` mode the valid
 ones are sent and the rest come back in the response's `errors[]` as
 `[{index, message}]`.
+
+Batch items never send from the shared domain: such an item gets 403
+`inbox_send_policy`, which in `strict` mode fails the whole batch. A retry with the same
+`idempotency_key` gets the stored response, even if a recipient was refused or
+suppressed since.
+
+### Receiving
+
+Mail received at your domains and inboxes. Everything in a received email was
+written by its sender: show its `html` only in a sandbox, and give an LLM the
+`extracted_text` (hidden text, quotes and the signature removed) rather than the `html`.
+
+```php
+$page = $ms->emails->receiving->list([
+    'inbox_id' => $inboxId,          // only mail delivered to this inbox
+    'from' => 'example.com',         // an address, or a domain covering its subdomains
+    'subject_contains' => 'code',
+    'wait' => 30,                    // long-poll: answer as soon as a match arrives, up to 50 s
+]);
+$page['data'];                       // newest first
+$page['held'];                       // with wait: [{id, inbox_id, reason, quarantine_reason, created_at}] held back
+
+$email = $ms->emails->receiving->get($id, ['html_format' => 'cid']);
+$email['extracted_text'];            // the new part as plain text, hidden text removed (still untrusted)
+$email['extracted']['code'];         // a verification code, on inboxes with extract_codes
+$email['screening']['sender_trust']; // owner | allowlisted | known_thread | external | unauthenticated | failed
+
+$ms->emails->receiving->attachments->list($id);             // each with a signed download_url (1 hour)
+$ms->emails->receiving->attachments->get($id, $attachmentId);
+$ms->emails->receiving->remove($id);                        // erase now (MillionSend extension)
+
+// Reply and forward server-side (MillionSend extension). The inbox's rules may hold the
+// message as a draft that waits for a person: the API answers 202 and `kind` is 'draft'.
+$outcome = $ms->emails->receiving->reply($id, ['text' => 'Thanks!'], ['idempotency_key' => $key]);
+if ($outcome['kind'] === 'draft') {
+    $outcome['draft']['approval_reasons'];  // e.g. ['send_policy']
+} else {
+    $outcome['email']['id'];
+}
+$ms->emails->receiving->forward($id, ['to' => 'ops@acme.dev', 'text' => 'FYI', 'mode' => 'attachment']);
+```
+
+Held mail never reaches an inbox-scoped key or an agent: reading it throws
+`email_quarantined`. A full-access team key sees it with `'include_quarantined' => true`.
+
+`unread` needs `inbox_id`, except with an inbox-scoped key. An unknown `inbox_id` answers
+404 `not_found` at once, even with `wait`; an inbox-scoped key naming another inbox gets
+403 `restricted_api_key`.
+
+### Inboxes
+
+An inbox is one address that receives mail, read by an agent (`'kind' => 'agent'`,
+the default) or by people (`'kind' => 'human'`). Threads, labels, drafts and their
+paths mirror Resend's Inboxes beta; `safety`, `codes` and `quarantine` are
+MillionSend extensions.
+
+```php
+$inbox = $ms->inboxes->create([
+    'name' => 'Signup bot',          // 1-320 characters
+    'username' => 'signup-bot',      // no email_address: signup-bot@<team>.<shared domain>; omitted, a random name
+    'expires_in' => '24h',           // '1h' to '365d'; omitted or null, it never expires
+    'safety' => ['accept_from' => 'anyone'],
+]);
+$ms->inboxes->create(['email_address' => 'support@acme.dev', 'name' => 'Support', 'kind' => 'human']);
+$ms->inboxes->create(['domain_id' => $domainId, 'username' => 'billing']); // billing@<your domain>, by its GET /domains id
+$ms->inboxes->list(['kind' => 'agent']);
+$ms->inboxes->get('support@acme.dev');                       // by id or address
+$ms->inboxes->update($inbox['id'], ['from_name' => 'Acme', 'expires_in' => '7d']);
+$ms->inboxes->remove($inbox['id']);                          // also revokes its inbox-scoped keys
+
+// Codes and sign-in links, without parsing HTML (wait long-polls up to 50 s)
+$code = $ms->inboxes->codes->latest($inbox['id'], ['from' => 'github.com', 'wait' => 30]);
+$code['status'];                     // 'found' | 'none' | 'ambiguous' | 'timeout'; $code['code'], $code['url']
+// A second sign-in: only mail received after the code already used counts
+$next = $ms->inboxes->codes->latest($inbox['id'], ['wait' => 30, 'since' => $code['received_at']]);
+
+// Safety rules: who can write in, what the inbox may send
+$ms->inboxes->safety->get($inbox['id']);
+$ms->inboxes->safety->update($inbox['id'], ['accept_from' => 'allowlist', 'allowlist' => ['*@acme.dev']]);
+
+// Quarantine: held mail, kept until a person releases it
+$ms->inboxes->quarantine->list($inbox['id']);
+$ms->inboxes->quarantine->release($inbox['id'], $emailId, ['trust_sender' => true]);
+
+// Threads and their messages
+$ms->inboxes->threads->list($inbox['id'], ['folders' => ['inbox', 'archive'], 'read' => false]);
+$ms->inboxes->threads->list($inbox['id'], ['include_quarantined' => true]); // full-access team keys: each item also has 'quarantined'
+$ms->inboxes->threads->search($inbox['id'], ['query' => 'invoice', 'from' => ['example.com']]);
+$ms->inboxes->threads->get($inbox['id'], $threadId);
+$ms->inboxes->threads->update($inbox['id'], $threadId, ['read' => true, 'folder' => 'archive', 'label_id' => $labelId]);
+$ms->inboxes->threads->remove($inbox['id'], $threadId);     // to trash, purged after 30 days
+$ms->inboxes->threads->emails->list($inbox['id'], $threadId); // oldest first
+$ms->inboxes->threads->emails->get($inbox['id'], $threadId, $emailId);
+$ms->inboxes->threads->emails->reply($inbox['id'], $threadId, $emailId, ['text' => 'Done.'], ['idempotency_key' => $key]);
+$ms->inboxes->threads->emails->forward($inbox['id'], $threadId, $emailId, ['to' => 'ops@acme.dev']);
+
+// Labels (up to 100 per inbox)
+$ms->inboxes->labels->create($inbox['id'], ['name' => 'Billing', 'color' => '#FF8800']);
+$ms->inboxes->labels->list($inbox['id']);
+$ms->inboxes->labels->update($inbox['id'], $labelId, ['name' => 'Invoices']);
+$ms->inboxes->labels->remove($inbox['id'], $labelId);
+
+// Drafts, and the ones that wait for approval
+$ms->inboxes->drafts->create($inbox['id'], ['to' => 'ada@example.com', 'subject' => 'Hi', 'text' => '…']);
+$ms->inboxes->drafts->list($inbox['id']);
+$ms->inboxes->drafts->get($inbox['id'], $draftId);
+$ms->inboxes->drafts->update($inbox['id'], $draftId, ['cc' => null]);  // null clears
+$ms->inboxes->drafts->send($inbox['id'], $draftId, ['idempotency_key' => $key]); // ['kind' => 'sent'|'draft', …]
+$ms->inboxes->drafts->reject($inbox['id'], $draftId);
+$ms->inboxes->drafts->remove($inbox['id'], $draftId);
+```
+
+Replies, forwards and `drafts->send()` return `['kind' => 'sent', 'email' => …]` or,
+when the inbox's rules hold the message for a person (HTTP 202),
+`['kind' => 'draft', 'draft' => …]`. A key restricted to the inbox cannot send a draft
+that waits for approval (`approval_required`); a person in the dashboard or a
+full-access team key approves it. camelCase spellings (`inboxId`, `replyAll`,
+`requiresApproval`, `expiresIn`, `acceptFrom`, `trustSender`, `labelId`, `threadId`,
+`replyToEmailId`, `domainId`, …) are renamed like everywhere else. Hosted agent settings
+(`/inboxes/:id/agent`) are not exposed: MillionSend runs no agent of its own.
+
+`inboxes->create()` takes no Idempotency-Key. After a 503 or 429 nothing was created, so
+sending it again is safe; after a timeout a retry may create a second inbox, and with a
+chosen `username` a 409 on the retry usually means the first attempt worked
+(`$ms->inboxes->get($address)` finds it). Older servers ignore keys they don't know:
+`username` before v0.12.0 and `domain_id` before v0.14.0, so check the created inbox's
+`email_address`; `since` before v0.13.0, so the code you already used can come back.
+
+#### The shared domain
+
+Without `email_address`, an inbox gets an address on the instance's shared inbox domain,
+which needs no DNS: `<username>@<team>.<shared domain>`. That subdomain is the
+`shared: true` row of [`domains->list()`](#domains), whose id is the inbox's `domain_id`;
+passing it as `domain_id` works like leaving `email_address` out. With the id of one of
+your own domains instead, `username` is required and the address is `<username>@<domain>`
+(the domain needs receiving on, or `'forwarding' => true`).
+
+- **`username`** is trimmed and lowercased: 1-64 of `a-z 0-9 . _ -`, starting and ending
+  with a letter or digit, no `..`. Reserved names (`postmaster`, `abuse`, `admin`, …), a
+  `fwd-` prefix and brand look-alikes get 422, and a name in use 409. Send `username` or
+  `email_address`, not both.
+- **Name review.** A chosen `username` or `from_name` (on create and update) is reviewed
+  first. While the review is unavailable, the answer is 503 `name_review_unavailable`
+  with `retry-after: 60` (leaving `username` out still gives a random address). While a
+  new team's subdomain waits for its own review, every shared-domain or `forwarding`
+  inbox create gets that 503 with `retry-after: 300`. Past the daily review budget, the
+  answer is 429 `rate_limit_exceeded` until the next UTC midnight.
+- **Lifetime.** Inboxes never expire unless `expires_in` says so. A shared-domain inbox
+  unused for 90 days (no mail in or out, no API call on it) is deleted, firing
+  `inbox.expired` and then `inbox.deleted`.
+- **Sending** follows the row's `sending_mode`: `open` starts conversations (with
+  [`emails->send()`](#emails) too), `reply_only` only replies inside a thread to its
+  own correspondents, and `receive_only` sends nothing. An inbox whose name looks like a
+  brand only replies, even under `open`. Batch and broadcast sends never use the shared
+  domain.
+- **Safety.** A `send_policy` of `open` is accepted only while the mode is `open`, and
+  `allowlist` never; `owner_addresses` don't make senders trusted; `forward_to` copies
+  go only to team members' sign-in addresses.
+
+The refusals are the same for `emails->send()`, replies, forwards and `drafts->send()`:
+
+| Status | Name | When |
+|---|---|---|
+| 403 | `inbox_send_policy` | `sending_mode` is `receive_only`, or `reply_only` outside a thread (`sending_mode_reason` says whether the plan or the instance holds it); an inbox name that looks like a brand; any batch or broadcast send |
+| 429 | `inbox_send_cap_reached` | the team's daily cap for mail from the shared domain; `getRetryAfter()` runs to the next UTC midnight |
+| 422 | `validation_error` | more than 10 distinct recipients (`drafts->create()` too); on `emails->send()`, a `from` or field the shared domain doesn't take |
+
+A person or a team key sending a draft skips the inbox's own rules, never the shared
+domain's. An agent's reply to a `Reply-To` at another organization is held: a 202
+draft whose `approval_reasons` include `reply_to_redirect`.
 
 ### Contacts
 
@@ -201,7 +431,7 @@ $result = $ms->contacts->batch->create($contacts, [
 ]);
 // $result['data'][] = ['index' => 0, 'id' => '…', 'status' => 'created'|'updated'|'skipped']
 // $result['counts'] = ['created' => n, 'updated' => n, 'skipped' => n, 'failed' => n]
-// $result['errors'][] = ['index' => 3, 'message' => '…']   (permissive mode)
+// $result['errors'][] = ['index' => 3, 'statusCode' => 422, 'name' => 'validation_error', 'message' => '…']   (permissive mode)
 
 // Bulk lookup (MillionSend extension) — up to 1000 contacts by id or email in one request,
 // in request order; unknown entries are listed, not errors — one request against the rate limit
@@ -238,7 +468,9 @@ $ms->topics->remove($id);
 ### Broadcasts
 
 Targeting is an optional `segment_id` and/or `topic_id` — omit both to send to
-every contact on the team.
+every contact on the team. `subject` takes up to 998 characters. Broadcasts never send
+from [the shared domain](#the-shared-domain): `create()` with `send` and `send()` answer
+403 `inbox_send_policy`.
 
 ```php
 $broadcast = $ms->broadcasts->create([
@@ -311,7 +543,31 @@ $ms->domains->list();
 $ms->domains->get($id);
 $ms->domains->verify($id);             // re-check DNS
 $ms->domains->update($id, ['open_tracking' => false, 'tracking_subdomain' => null]);
+$ms->domains->update($id, ['capabilities' => ['receiving' => 'enabled']]); // receive mail (verified domains)
+$ms->domains->update($id, ['receiving_catch_all' => true]); // accept mail for addresses without an inbox
 $ms->domains->remove($id);
+```
+
+On an instance with a shared inbox domain, `list()` ends with your team's subdomain of it
+(`<team>.<shared domain>`, see [the shared domain](#the-shared-domain)), after every page
+of your own domains, so it can come alone on a last page. Every row carries `shared`:
+`true` there, `false` on your own domains. Servers before v0.14.0 send no `shared` and no
+such row, so read it as `$domain['shared'] ?? false`. Only the shared row has
+`sending_mode` (`open`, `reply_only` or `receive_only`: what its inboxes may send) and
+`sending_mode_reason` (`plan` or `instance`, what holds it below `open`; `null` when
+`open`). Its `capabilities['sending']` is `disabled` under `receive_only`, and `get()`
+returns it with `records: []`. It is read-only: `update()`, `verify()` and `remove()`
+answer 403 `forbidden`. A new team's row shows up once its subdomain passes its name
+review.
+
+The shared row sends only from an inbox's own address, so leave it out when picking a
+sender domain:
+
+```php
+$senders = array_filter(
+    $ms->domains->list()['data'],
+    fn (array $domain) => $domain['status'] === 'verified' && !($domain['shared'] ?? false),
+);
 ```
 
 ### Webhooks
@@ -338,10 +594,18 @@ $rotated['previous_secret_expires_at'];  // ISO timestamp while the old secret s
 During the overlap every delivery carries both signatures (new first, then previous,
 space-separated in `webhook-signature`), so a receiver holding either verifies.
 
-Subscribable `events` include `email.*` plus the contact and suppression events:
-`contact.created`, `contact.updated`, `contact.deleted`, `contact.unsubscribed`,
-`contact.resubscribed`, `contact.topic_opt_in`, `contact.topic_opt_out`,
-`suppression.added`, `suppression.removed`.
+Subscribable `events` include `email.*` (with `email.received`) plus the contact and
+suppression events: `contact.created`, `contact.updated`, `contact.deleted`,
+`contact.unsubscribed`, `contact.resubscribed`, `contact.topic_opt_in`,
+`contact.topic_opt_out`, `suppression.added`, `suppression.removed`; and the `inbox.*`
+events: `inbox.created`, `inbox.updated`, `inbox.deleted`, `inbox.expired`,
+`inbox.thread.created`, `inbox.thread.folder.updated`, `inbox.thread.labels.updated`,
+`inbox.email.received`, `inbox.email.sent`, `inbox.email.quarantined`,
+`inbox.draft.created`, `inbox.draft.updated`, `inbox.draft.sent`, `inbox.draft.deleted`.
+Inbox events reach only endpoints that list them by name. `inbox_ids` limits an
+endpoint's inbox events and `email.received` to those inboxes (`null` = every inbox).
+Their `data.source` says who acted: `api`, `dashboard` or `system`. A shared-domain
+inbox deleted after 90 unused days fires `inbox.expired`, then `inbox.deleted`.
 
 ### API keys
 
@@ -349,9 +613,11 @@ Subscribable `events` include `email.*` plus the contact and suppression events:
 $key = $ms->apiKeys->create([
     'name' => 'ci',
     'permission' => 'sending_access',  // full_access (default) | sending_access
-    'domain_id' => $domainId,          // optional: restrict a sending key to one domain
+    'domain_id' => $domainId,          // optional: restrict a sending key to one of your domains (a shared: false row)
 ]);
 $key['token'];                         // shown once, never returned again
+$ms->apiKeys->create(['name' => 'signup-agent', 'permission' => 'full_access', 'inbox_id' => $inboxId]);
+                                       // reads that inbox only and sends only from its address
 $ms->apiKeys->list();
 $ms->apiKeys->remove($id);
 ```
@@ -415,14 +681,16 @@ match `resend-php`; snake_case payloads pass through to the wire untouched. Note
   membership is a dynamic `filter` rather than a static list.
 - **Not offered here** (no MillionSend endpoint): `->contacts->imports`,
   `->contacts->segments->list()`, email
-  `share()`/`metrics()`, `->emails->attachments`/`->receiving`, `->webhooks->events`
+  `share()`/`metrics()`, `->emails->attachments`, `->webhooks->events`
   and the local `verify()` helper, `->domains->claims`, `->broadcasts->recipients()`
   /`->clickedLinks`, `->apiKeys->update()`, and the `->events`/`->logs`/`->automations`
-  services. Domain `tls`/`capabilities` pass through and are answered with 422.
+  services. Domain `tls` passes through and is answered with 422.
 - **MillionSend extensions** (no Resend counterpart): segment `filter`,
   `->contacts->batch`, `->contacts->preferencesLink()`, `->webhooks->rotate()`,
   `->emails->getInsights()`, `->emails->remove()`,
-  `->deliverability`, `->usage`.
+  `->deliverability`, `->usage`, `->emails->receiving->reply()` / `->forward()` /
+  `->remove()` (resend-php's `->receiving` has `get`, `list` and attachments only), and
+  `->inboxes` (Resend's Inboxes are not in resend-php yet).
 
 ## Calling endpoints the SDK does not wrap yet
 

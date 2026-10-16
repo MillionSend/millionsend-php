@@ -20,10 +20,19 @@ final class Emails
         'topicId' => 'topic_id',
     ];
 
-    public function __construct(private readonly HttpClient $http) {}
+    public readonly Receiving $receiving;
+
+    public function __construct(private readonly HttpClient $http)
+    {
+        $this->receiving = new Receiving($http);
+    }
 
     /**
      * POST /emails. Options: `idempotencyKey` (or resend-php's `idempotency_key`).
+     * `from` may be an inbox's address on the shared domain while that domain's
+     * `sending_mode` is `open`: exactly the inbox's `email_address`, a display
+     * name left out or equal to its `from_name`, at most 10 recipients, and no
+     * `reply_to`, `attachments`, `headers` or `scheduled_at`.
      *
      * @param array<string,mixed> $params
      * @param array{idempotencyKey?: string, idempotency_key?: string} $options

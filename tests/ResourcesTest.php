@@ -483,7 +483,7 @@ describe('contacts (full body, batch, segments)', function () {
         $response = [
             'data' => [['object' => 'contact', 'index' => 0, 'id' => 'c1', 'status' => 'created']],
             'counts' => ['created' => 1, 'updated' => 0, 'skipped' => 0, 'failed' => 1],
-            'errors' => [['index' => 1, 'message' => 'Invalid email']],
+            'errors' => [['index' => 1, 'statusCode' => 422, 'name' => 'validation_error', 'message' => 'Invalid email']],
         ];
         [$ms, $spy] = fakeClient(200, $response);
         $res = $ms->contacts->batch->create(
@@ -917,5 +917,589 @@ describe('usage', function () {
         expect($ms->usage->get())->toBe($report);
         expect($spy->at(0)->getMethod())->toBe('GET');
         expect($spy->at(0)->getUri()->getPath())->toBe('/usage');
+    });
+});
+
+const INBOX_ID = '6f1c9a1e-0000-4000-8000-0000000000a1';
+const THREAD_ID = '6f1c9a1e-0000-4000-8000-0000000000b1';
+const EMAIL_ID = '6f1c9a1e-0000-4000-8000-0000000000c1';
+const DRAFT_ID = '6f1c9a1e-0000-4000-8000-0000000000d1';
+const SHARED_DOMAIN_ID = '6f1c9a1e-0000-4000-8000-0000000000e1';
+const OWN_DOMAIN_ID = '6f1c9a1e-0000-4000-8000-0000000000e2';
+
+/** @return array<string, mixed> */
+function inboxFixture(): array
+{
+    return [
+        'object' => 'inbox',
+        'id' => INBOX_ID,
+        'name' => 'Signup bot',
+        'email_address' => 'signup-bot-7f3k@acme.agents.example.com',
+        'domain_id' => SHARED_DOMAIN_ID,
+        'receiving_address' => null,
+        'from_name' => null,
+        'unread' => 1,
+        'drafts' => 0,
+        'last_received' => '2026-10-12T10:05:00.000Z',
+        'created_at' => '2026-10-12T10:00:00.000Z',
+        'kind' => 'agent',
+        'shared' => true,
+        'expires_at' => null,
+        'quarantined' => 0,
+        'pending_approval' => 0,
+    ];
+}
+
+/** @return array<string, mixed> */
+function draftFixture(): array
+{
+    return [
+        'object' => 'inbox_draft',
+        'id' => DRAFT_ID,
+        'type' => 'reply',
+        'to' => ['ada@example.com'],
+        'cc' => [],
+        'bcc' => [],
+        'subject' => 'Re: Confirm your email',
+        'html' => null,
+        'text' => 'Thanks, confirmed.',
+        'thread_id' => THREAD_ID,
+        'reply_to_email_id' => EMAIL_ID,
+        'email_id' => null,
+        'created_at' => '2026-10-12T10:06:00.000Z',
+        'updated_at' => '2026-10-12T10:06:00.000Z',
+        'status' => 'pending_approval',
+        'approval_reasons' => ['send_policy'],
+        'forward' => false,
+        'decided_by' => null,
+        'decided_at' => null,
+        'expires_at' => '2026-10-19T10:06:00.000Z',
+    ];
+}
+
+/** @return array<string, mixed> */
+function sentEmailFixture(): array
+{
+    return [
+        'id' => EMAIL_ID,
+        'direction' => 'outbound',
+        'from' => 'signup-bot-7f3k@acme.agents.example.com',
+        'to' => ['ada@example.com'],
+        'cc' => [],
+        'bcc' => [],
+        'reply_to' => [],
+        'subject' => 'Re: Confirm your email',
+        'message_id' => null,
+        'html' => null,
+        'text' => 'Thanks, confirmed.',
+        'attachments' => [],
+        'read' => true,
+        'received_at' => '2026-10-12T10:06:00.000Z',
+        'email_id' => EMAIL_ID,
+        'thread_id' => THREAD_ID,
+        'inbox_id' => INBOX_ID,
+        'status' => 'queued',
+    ];
+}
+
+describe('emails->receiving', function () {
+    it('list renames the filters and sends flags as true/false', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'list', 'has_more' => false, 'data' => [], 'held' => []]);
+
+        $res = $ms->emails->receiving->list([
+            'limit' => 10,
+            'wait' => 30,
+            'since' => '2026-10-12T10:00:00Z',
+            'inboxId' => INBOX_ID,
+            'to' => 'bot@acme.dev',
+            'from' => 'example.com',
+            'subjectContains' => 'code',
+            'unread' => false,
+            'include_quarantined' => true,
+            'before' => null,
+        ]);
+        expect($spy->at(0)->getMethod())->toBe('GET');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/emails/receiving');
+        expect(queryOf($spy->at(0)))->toBe([
+            'limit' => '10',
+            'wait' => '30',
+            'since' => '2026-10-12T10:00:00Z',
+            'inbox_id' => INBOX_ID,
+            'to' => 'bot@acme.dev',
+            'from' => 'example.com',
+            'subject_contains' => 'code',
+            'unread' => 'false',
+            'include_quarantined' => 'true',
+        ]);
+        expect($res['held'])->toBe([]);
+
+        $ms->emails->receiving->list();
+        expect($spy->at(1)->getUri()->getQuery())->toBe('');
+    });
+
+    it('list sends unread without an inbox_id; an unknown inbox_id is a 404, even with wait', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'list', 'has_more' => false, 'data' => []]);
+        $ms->emails->receiving->list(['unread' => false]);
+        expect(queryOf($spy->at(0)))->toBe(['unread' => 'false']);
+
+        [$ms] = fakeClient(404, ['statusCode' => 404, 'name' => 'not_found', 'message' => 'Inbox not found.']);
+        expect(fn () => $ms->emails->receiving->list(['inboxId' => INBOX_ID, 'wait' => 30]))
+            ->toThrow(function (MillionSend\Exceptions\ErrorException $e) {
+                expect($e->getErrorName())->toBe('not_found');
+                expect($e->getStatusCode())->toBe(404);
+            });
+    });
+
+    it('get passes html_format and keeps the extension fields', function () {
+        $detail = [
+            'object' => 'email',
+            'id' => EMAIL_ID,
+            'extracted_text' => 'Your verification code is 482913',
+            'extracted' => ['kinds' => ['code'], 'code' => '482913', 'link' => null, 'ambiguous' => false],
+            'screening' => ['verdict' => 'clean', 'sender_trust' => 'brand_new_tier'],
+            'future_field' => ['nested' => true],
+        ];
+        [$ms, $spy] = fakeClient(200, $detail);
+
+        expect($ms->emails->receiving->get(EMAIL_ID, ['htmlFormat' => 'cid']))->toBe($detail);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/emails/receiving/' . EMAIL_ID);
+        expect(queryOf($spy->at(0)))->toBe(['html_format' => 'cid']);
+
+        $ms->emails->receiving->get(EMAIL_ID);
+        expect($spy->at(1)->getUri()->getQuery())->toBe('');
+    });
+
+    it('reply renames the body, sends an Idempotency-Key and reads 200 as sent', function () {
+        $sent = ['object' => 'email', 'id' => EMAIL_ID, 'thread_id' => THREAD_ID, 'inbox_id' => INBOX_ID];
+        [$ms, $spy] = fakeClient(200, $sent);
+
+        $res = $ms->emails->receiving->reply(EMAIL_ID, [
+            'text' => 'Thanks, confirmed.',
+            'replyAll' => true,
+            'requiresApproval' => false,
+            'from' => 'bot@acme.dev',
+            'inboxId' => INBOX_ID,
+        ], ['idempotencyKey' => 'reply-1']);
+
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/emails/receiving/' . EMAIL_ID . '/reply');
+        expect(bodyOf($spy->at(0)))->toBe([
+            'text' => 'Thanks, confirmed.',
+            'reply_all' => true,
+            'requires_approval' => false,
+            'from' => 'bot@acme.dev',
+            'inbox_id' => INBOX_ID,
+        ]);
+        expect($spy->at(0)->getHeaderLine('Idempotency-Key'))->toBe('reply-1');
+        expect($res)->toBe(['kind' => 'sent', 'email' => $sent]);
+    });
+
+    it('a 202 answer is the draft held for approval', function () {
+        [$ms] = fakeClient(202, draftFixture());
+
+        $res = $ms->emails->receiving->reply(EMAIL_ID, ['text' => 'hi'], ['idempotency_key' => 'reply-2']);
+        expect($res)->toBe(['kind' => 'draft', 'draft' => draftFixture()]);
+    });
+
+    it('forward sends to, mode and the note; errors throw', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'email', 'id' => EMAIL_ID, 'thread_id' => null, 'inbox_id' => null]);
+
+        $res = $ms->emails->receiving->forward(EMAIL_ID, ['to' => ['ops@acme.dev'], 'text' => 'FYI', 'mode' => 'attachment'], ['idempotencyKey' => 'fwd-1']);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/emails/receiving/' . EMAIL_ID . '/forward');
+        expect(bodyOf($spy->at(0)))->toBe(['to' => ['ops@acme.dev'], 'text' => 'FYI', 'mode' => 'attachment']);
+        expect($spy->at(0)->getHeaderLine('Idempotency-Key'))->toBe('fwd-1');
+        expect($res['kind'])->toBe('sent');
+
+        [$ms] = fakeClient(403, ['statusCode' => 403, 'name' => 'email_quarantined', 'message' => 'held']);
+        try {
+            $ms->emails->receiving->forward(EMAIL_ID, ['to' => 'ops@acme.dev']);
+            $this->fail('expected an ErrorException');
+        } catch (MillionSend\Exceptions\ErrorException $e) {
+            expect($e->getErrorName())->toBe('email_quarantined');
+            expect($e->getStatusCode())->toBe(403);
+        }
+    });
+
+    it('remove erases; attachments list and get', function () {
+        [$ms, $spy] = fakeClient();
+
+        $ms->emails->receiving->remove(EMAIL_ID);
+        expect($spy->at(0)->getMethod())->toBe('DELETE');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/emails/receiving/' . EMAIL_ID);
+
+        $ms->emails->receiving->attachments->list(EMAIL_ID, ['limit' => 5]);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/emails/receiving/' . EMAIL_ID . '/attachments');
+        expect($spy->at(1)->getUri()->getQuery())->toBe('limit=5');
+
+        $ms->emails->receiving->attachments->get(EMAIL_ID, 'att-1');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/emails/receiving/' . EMAIL_ID . '/attachments/att-1');
+    });
+});
+
+describe('inboxes', function () {
+    it('create renames every field, safety included; no argument sends {}', function () {
+        [$ms, $spy] = fakeClient(201, inboxFixture());
+
+        $res = $ms->inboxes->create([
+            'emailAddress' => 'support@acme.dev',
+            'name' => 'Support',
+            'fromName' => 'Acme Support',
+            'kind' => 'human',
+            'expiresIn' => null,
+            'safety' => ['acceptFrom' => 'allowlist', 'allowlist' => ['*@acme.dev'], 'sendCap' => null, 'forward_to' => []],
+        ]);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/inboxes');
+        expect(bodyOf($spy->at(0)))->toBe([
+            'email_address' => 'support@acme.dev',
+            'name' => 'Support',
+            'from_name' => 'Acme Support',
+            'kind' => 'human',
+            'expires_in' => null,
+            'safety' => ['accept_from' => 'allowlist', 'allowlist' => ['*@acme.dev'], 'send_cap' => null, 'forward_to' => []],
+        ]);
+        expect($res)->toBe(inboxFixture());
+
+        $ms->inboxes->create();
+        expect((string) $spy->at(1)->getBody())->toBe('{}');
+    });
+
+    it('create sends username and domainId, alone or together', function () {
+        [$ms, $spy] = fakeClient(201, inboxFixture());
+
+        $ms->inboxes->create(['username' => 'ada']);
+        expect((string) $spy->at(0)->getBody())->toBe('{"username":"ada"}');
+
+        $ms->inboxes->create(['domainId' => SHARED_DOMAIN_ID]);
+        expect(bodyOf($spy->at(1)))->toBe(['domain_id' => SHARED_DOMAIN_ID]);
+
+        $ms->inboxes->create(['domainId' => OWN_DOMAIN_ID, 'username' => 'support']);
+        expect(bodyOf($spy->at(2)))->toBe(['domain_id' => OWN_DOMAIN_ID, 'username' => 'support']);
+    });
+
+    it('list, get by address, update and remove', function () {
+        [$ms, $spy] = fakeClient(200, inboxFixture());
+
+        $ms->inboxes->list(['limit' => 2, 'after' => INBOX_ID, 'kind' => 'agent']);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/inboxes');
+        expect(queryOf($spy->at(0)))->toBe(['limit' => '2', 'after' => INBOX_ID, 'kind' => 'agent']);
+
+        $ms->inboxes->get('Support@acme.dev');
+        expect($spy->at(1)->getUri()->getPath())->toBe('/inboxes/Support%40acme.dev');
+
+        $ms->inboxes->update(INBOX_ID, ['name' => 'Bot', 'fromName' => '', 'expires_in' => '7d']);
+        expect($spy->at(2)->getMethod())->toBe('PATCH');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID);
+        expect(bodyOf($spy->at(2)))->toBe(['name' => 'Bot', 'from_name' => '', 'expires_in' => '7d']);
+
+        $ms->inboxes->remove(INBOX_ID);
+        expect($spy->at(3)->getMethod())->toBe('DELETE');
+        expect($spy->at(3)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID);
+    });
+
+    it('passes unknown keys and enum values through', function () {
+        $future = [...inboxFixture(), 'kind' => 'team', 'brand_new' => [1, 2]];
+        [$ms] = fakeClient(200, $future);
+
+        expect($ms->inboxes->get(INBOX_ID))->toBe($future);
+    });
+
+    it('safety, codes and quarantine', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'inbox_safety', 'inbox_id' => INBOX_ID]);
+
+        $ms->inboxes->safety->get(INBOX_ID);
+        expect($spy->at(0)->getMethod())->toBe('GET');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/safety');
+
+        $ms->inboxes->safety->update(INBOX_ID, ['sendCap' => 25, 'accept_from' => 'verified']);
+        expect($spy->at(1)->getMethod())->toBe('PATCH');
+        expect(bodyOf($spy->at(1)))->toBe(['send_cap' => 25, 'accept_from' => 'verified']);
+
+        $ms->inboxes->codes->latest(INBOX_ID, ['from' => 'example.com', 'wait' => 20, 'maxAge' => 600]);
+        expect($spy->at(2)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/codes/latest');
+        expect(queryOf($spy->at(2)))->toBe(['from' => 'example.com', 'wait' => '20', 'max_age' => '600']);
+
+        $ms->inboxes->quarantine->list(INBOX_ID, ['limit' => 3]);
+        expect($spy->at(3)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/quarantine');
+        expect($spy->at(3)->getUri()->getQuery())->toBe('limit=3');
+
+        $ms->inboxes->quarantine->release(INBOX_ID, EMAIL_ID, ['trustSender' => true]);
+        expect($spy->at(4)->getMethod())->toBe('POST');
+        expect($spy->at(4)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/quarantine/' . EMAIL_ID . '/release');
+        expect(bodyOf($spy->at(4)))->toBe(['trust_sender' => true]);
+
+        $ms->inboxes->quarantine->release(INBOX_ID, EMAIL_ID);
+        expect((string) $spy->at(5)->getBody())->toBe('{}');
+
+        $ms->inboxes->codes->latest(INBOX_ID, ['wait' => 30, 'since' => '2026-10-16T12:00:00.000Z']);
+        expect(queryOf($spy->at(6)))->toBe(['wait' => '30', 'since' => '2026-10-16T12:00:00.000Z']);
+    });
+
+    it('labels list, create, update and remove', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'inbox_label', 'id' => 'l1']);
+
+        $ms->inboxes->labels->list(INBOX_ID);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/labels');
+
+        $ms->inboxes->labels->create(INBOX_ID, ['name' => 'Billing', 'color' => '#FF8800']);
+        expect($spy->at(1)->getMethod())->toBe('POST');
+        expect(bodyOf($spy->at(1)))->toBe(['name' => 'Billing', 'color' => '#FF8800']);
+
+        $ms->inboxes->labels->update(INBOX_ID, 'l1', ['name' => 'Invoices']);
+        expect($spy->at(2)->getMethod())->toBe('PATCH');
+        expect($spy->at(2)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/labels/l1');
+
+        $ms->inboxes->labels->remove(INBOX_ID, 'l1');
+        expect($spy->at(3)->getMethod())->toBe('DELETE');
+        expect($spy->at(3)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/labels/l1');
+    });
+
+    it('threads list and search send lists comma-separated and drop empty ones', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'list', 'has_more' => false, 'data' => []]);
+
+        $ms->inboxes->threads->list(INBOX_ID, [
+            'folders' => ['inbox', 'archive'],
+            'labels' => [],
+            'read' => false,
+            'includeQuarantined' => true,
+            'limit' => 20,
+        ]);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/threads');
+        expect(queryOf($spy->at(0)))->toBe([
+            'folders' => 'inbox,archive',
+            'read' => 'false',
+            'include_quarantined' => 'true',
+            'limit' => '20',
+        ]);
+
+        $ms->inboxes->threads->search(INBOX_ID, [
+            'query' => '"invoice 42" -spam',
+            'from' => ['ada', 'example.com'],
+            'hasAttachment' => true,
+            'startDate' => '2026-10-01',
+            'end_date' => '2026-10-12',
+        ]);
+        expect($spy->at(1)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/threads/search');
+        expect(queryOf($spy->at(1)))->toBe([
+            'query' => '"invoice 42" -spam',
+            'from' => 'ada,example.com',
+            'has_attachment' => 'true',
+            'start_date' => '2026-10-01',
+            'end_date' => '2026-10-12',
+        ]);
+    });
+
+    it('thread items carry quarantined only when the server sends it', function () {
+        $item = [
+            'id' => THREAD_ID,
+            'subject' => 'Invoice 42',
+            'from' => 'billing@example.com',
+            'to' => ['signup-bot-7f3k@acme.agents.example.com'],
+            'cc' => [],
+            'bcc' => [],
+            'labels' => [],
+            'message_count' => 3,
+            'has_attachment' => false,
+            'has_draft' => false,
+            'read' => false,
+            'received_at' => '2026-10-12T10:05:00.000Z',
+            'folder' => 'inbox',
+        ];
+        [$ms] = fakeClient(200, ['object' => 'list', 'has_more' => false, 'data' => [[...$item, 'quarantined' => 2], $item]]);
+
+        $data = $ms->inboxes->threads->list(INBOX_ID, ['includeQuarantined' => true])['data'];
+        expect($data[0]['quarantined'])->toBe(2);
+        expect($data[1])->not->toHaveKey('quarantined');
+    });
+
+    it('threads get, update and remove', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'inbox_thread', 'id' => THREAD_ID]);
+
+        $ms->inboxes->threads->get(INBOX_ID, THREAD_ID);
+        expect($spy->at(0)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/threads/' . THREAD_ID);
+
+        $ms->inboxes->threads->update(INBOX_ID, THREAD_ID, ['read' => true, 'folder' => 'archive', 'labelId' => 'l1']);
+        expect($spy->at(1)->getMethod())->toBe('PATCH');
+        expect(bodyOf($spy->at(1)))->toBe(['read' => true, 'folder' => 'archive', 'label_id' => 'l1']);
+
+        $ms->inboxes->threads->remove(INBOX_ID, THREAD_ID);
+        expect($spy->at(2)->getMethod())->toBe('DELETE');
+    });
+
+    it('thread emails list, get, reply and forward', function () {
+        $base = '/inboxes/' . INBOX_ID . '/threads/' . THREAD_ID . '/emails';
+        [$ms, $spy] = fakeClient(200, sentEmailFixture());
+
+        $ms->inboxes->threads->emails->list(INBOX_ID, THREAD_ID, ['after' => EMAIL_ID, 'includeQuarantined' => true]);
+        expect($spy->at(0)->getUri()->getPath())->toBe($base);
+        expect(queryOf($spy->at(0)))->toBe(['after' => EMAIL_ID, 'include_quarantined' => 'true']);
+
+        $ms->inboxes->threads->emails->get(INBOX_ID, THREAD_ID, EMAIL_ID);
+        expect($spy->at(1)->getUri()->getPath())->toBe($base . '/' . EMAIL_ID);
+        expect($spy->at(1)->getUri()->getQuery())->toBe('');
+
+        $ms->inboxes->threads->emails->get(INBOX_ID, THREAD_ID, EMAIL_ID, ['include_quarantined' => true]);
+        expect(queryOf($spy->at(2)))->toBe(['include_quarantined' => 'true']);
+
+        $res = $ms->inboxes->threads->emails->reply(INBOX_ID, THREAD_ID, EMAIL_ID, ['text' => 'Done.', 'replyAll' => true], ['idempotencyKey' => 'r-1']);
+        expect($spy->at(3)->getMethod())->toBe('POST');
+        expect($spy->at(3)->getUri()->getPath())->toBe($base . '/' . EMAIL_ID . '/reply');
+        expect(bodyOf($spy->at(3)))->toBe(['text' => 'Done.', 'reply_all' => true]);
+        expect($spy->at(3)->getHeaderLine('Idempotency-Key'))->toBe('r-1');
+        expect($res)->toBe(['kind' => 'sent', 'email' => sentEmailFixture()]);
+
+        [$held, $spy] = fakeClient(202, draftFixture());
+        $res = $held->inboxes->threads->emails->forward(INBOX_ID, THREAD_ID, EMAIL_ID, ['to' => 'stranger@example.com', 'requiresApproval' => true], ['idempotency_key' => 'f-1']);
+        expect($spy->at(0)->getUri()->getPath())->toBe($base . '/' . EMAIL_ID . '/forward');
+        expect(bodyOf($spy->at(0)))->toBe(['to' => 'stranger@example.com', 'requires_approval' => true]);
+        expect($spy->at(0)->getHeaderLine('Idempotency-Key'))->toBe('f-1');
+        expect($res)->toBe(['kind' => 'draft', 'draft' => draftFixture()]);
+    });
+
+    it('drafts list, create, get, update, remove and reject', function () {
+        $base = '/inboxes/' . INBOX_ID . '/drafts';
+        [$ms, $spy] = fakeClient(201, draftFixture());
+
+        $ms->inboxes->drafts->list(INBOX_ID, ['limit' => 5]);
+        expect($spy->at(0)->getUri()->getPath())->toBe($base);
+        expect($spy->at(0)->getUri()->getQuery())->toBe('limit=5');
+
+        $res = $ms->inboxes->drafts->create(INBOX_ID, ['to' => 'ada@example.com', 'text' => 'Hi', 'threadId' => THREAD_ID, 'replyToEmailId' => EMAIL_ID]);
+        expect($spy->at(1)->getMethod())->toBe('POST');
+        expect(bodyOf($spy->at(1)))->toBe(['to' => 'ada@example.com', 'text' => 'Hi', 'thread_id' => THREAD_ID, 'reply_to_email_id' => EMAIL_ID]);
+        expect($res['status'])->toBe('pending_approval');
+
+        $ms->inboxes->drafts->get(INBOX_ID, DRAFT_ID);
+        expect($spy->at(2)->getUri()->getPath())->toBe($base . '/' . DRAFT_ID);
+
+        $ms->inboxes->drafts->update(INBOX_ID, DRAFT_ID, ['cc' => null, 'subject' => null]);
+        expect($spy->at(3)->getMethod())->toBe('PATCH');
+        expect(bodyOf($spy->at(3)))->toBe(['cc' => null, 'subject' => null]);
+
+        $ms->inboxes->drafts->remove(INBOX_ID, DRAFT_ID);
+        expect($spy->at(4)->getMethod())->toBe('DELETE');
+
+        $ms->inboxes->drafts->reject(INBOX_ID, DRAFT_ID);
+        expect($spy->at(5)->getMethod())->toBe('POST');
+        expect($spy->at(5)->getUri()->getPath())->toBe($base . '/' . DRAFT_ID . '/reject');
+        expect((string) $spy->at(5)->getBody())->toBe('');
+    });
+
+    it('drafts->send posts no body with an Idempotency-Key; 200 sent, 202 held', function () {
+        $sent = ['object' => 'inbox_draft', 'id' => DRAFT_ID, 'thread_id' => THREAD_ID, 'email_id' => EMAIL_ID];
+        [$ms, $spy] = fakeClient(200, $sent);
+
+        $res = $ms->inboxes->drafts->send(INBOX_ID, DRAFT_ID, ['idempotencyKey' => 'send-1']);
+        expect($spy->at(0)->getMethod())->toBe('POST');
+        expect($spy->at(0)->getUri()->getPath())->toBe('/inboxes/' . INBOX_ID . '/drafts/' . DRAFT_ID . '/send');
+        expect((string) $spy->at(0)->getBody())->toBe('');
+        expect($spy->at(0)->hasHeader('Content-Type'))->toBeFalse();
+        expect($spy->at(0)->getHeaderLine('Idempotency-Key'))->toBe('send-1');
+        expect($res)->toBe(['kind' => 'sent', 'email' => $sent]);
+
+        [$held] = fakeClient(202, draftFixture());
+        expect($held->inboxes->drafts->send(INBOX_ID, DRAFT_ID))->toBe(['kind' => 'draft', 'draft' => draftFixture()]);
+
+        [$refused] = fakeClient(403, ['statusCode' => 403, 'name' => 'approval_required', 'message' => 'waits for a person']);
+        try {
+            $refused->inboxes->drafts->send(INBOX_ID, DRAFT_ID);
+            $this->fail('expected an ErrorException');
+        } catch (MillionSend\Exceptions\ErrorException $e) {
+            expect($e->getErrorName())->toBe('approval_required');
+        }
+    });
+});
+
+describe('inbox fields on existing resources', function () {
+    it('webhooks, api keys and domains carry the new fields', function () {
+        [$ms, $spy] = fakeClient();
+
+        $ms->webhooks->create(['endpoint' => 'https://acme.dev/hooks', 'events' => ['inbox.email.received'], 'inboxIds' => [INBOX_ID]]);
+        expect(bodyOf($spy->at(0)))->toBe(['endpoint' => 'https://acme.dev/hooks', 'events' => ['inbox.email.received'], 'inbox_ids' => [INBOX_ID]]);
+
+        $ms->webhooks->update('w1', ['inboxIds' => null]);
+        expect(bodyOf($spy->at(1)))->toBe(['inbox_ids' => null]);
+
+        $ms->apiKeys->create(['name' => 'agent', 'permission' => 'full_access', 'inboxId' => INBOX_ID]);
+        expect(bodyOf($spy->at(2)))->toBe(['name' => 'agent', 'permission' => 'full_access', 'inbox_id' => INBOX_ID]);
+
+        $ms->domains->update('d1', ['receivingCatchAll' => false]);
+        expect(bodyOf($spy->at(3)))->toBe(['receiving_catch_all' => false]);
+    });
+});
+
+/**
+ * A domain row as GET /domains lists it, without `shared` (as a server before v0.14.0 sends it).
+ *
+ * @param array<string, mixed> $fields
+ * @return array<string, mixed>
+ */
+function domainFixture(array $fields = []): array
+{
+    return [
+        'id' => OWN_DOMAIN_ID,
+        'name' => 'acme.dev',
+        'status' => 'verified',
+        'created_at' => '2026-10-01T09:00:00.000Z',
+        'region' => 'us-east-1',
+        'open_tracking' => false,
+        'click_tracking' => false,
+        'tracking_subdomain' => null,
+        'capabilities' => ['sending' => 'enabled', 'receiving' => 'enabled'],
+        'receiving_catch_all' => false,
+        ...$fields,
+    ];
+}
+
+describe('domains (the shared inbox domain)', function () {
+    it('get returns the shared row whole, records: [] included', function () {
+        $shared = domainFixture([
+            'object' => 'domain',
+            'id' => SHARED_DOMAIN_ID,
+            'name' => 'acme.agents.example.com',
+            'shared' => true,
+            'sending_mode' => 'reply_only',
+            'sending_mode_reason' => 'plan',
+            'records' => [],
+        ]);
+        [$ms] = fakeClient(200, $shared);
+
+        expect($ms->domains->get(SHARED_DOMAIN_ID))->toBe($shared);
+    });
+
+    it('list: sending_mode and its reason only on the shared row; an older server sends no shared', function () {
+        $page = [
+            'object' => 'list',
+            'has_more' => false,
+            'data' => [
+                domainFixture(['shared' => false]),
+                domainFixture(['id' => SHARED_DOMAIN_ID, 'shared' => true, 'sending_mode' => 'open', 'sending_mode_reason' => null]),
+            ],
+        ];
+        [$ms] = fakeClient(200, $page);
+        [$own, $row] = $ms->domains->list()['data'];
+
+        expect($own['shared'])->toBeFalse();
+        expect($own)->not->toHaveKey('sending_mode');
+        expect($own)->not->toHaveKey('sending_mode_reason');
+        expect($row['shared'])->toBeTrue();
+        expect($row['sending_mode'])->toBe('open');
+        expect($row['sending_mode_reason'])->toBeNull();
+
+        [$ms] = fakeClient(200, ['object' => 'list', 'has_more' => false, 'data' => [domainFixture()]]);
+        expect($ms->domains->list()['data'][0]['shared'] ?? false)->toBeFalse();
+
+        [$ms] = fakeClient(200, domainFixture(['id' => SHARED_DOMAIN_ID, 'shared' => true, 'sending_mode' => 'paused_for_review']));
+        expect($ms->domains->get(SHARED_DOMAIN_ID)['sending_mode'])->toBe('paused_for_review');
+    });
+
+    it('the shared row is read-only: 403 forbidden', function () {
+        [$ms] = fakeClient(403, ['statusCode' => 403, 'name' => 'forbidden', 'message' => 'it can\'t be changed or deleted']);
+
+        expect(fn () => $ms->domains->update(SHARED_DOMAIN_ID, ['openTracking' => true]))
+            ->toThrow(function (MillionSend\Exceptions\ErrorException $e) {
+                expect($e->getErrorName())->toBe('forbidden');
+                expect($e->getStatusCode())->toBe(403);
+            });
     });
 });
