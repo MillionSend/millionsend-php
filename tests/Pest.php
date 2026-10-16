@@ -33,18 +33,24 @@ final class RequestSpy
  * A MillionSend client backed by a stub Guzzle handler that returns a fixed
  * response and records each request into the returned spy.
  *
- * @param array<mixed>|string $body
+ * @param array<mixed>|string  $body
+ * @param array<string,string> $headers Response headers, over a JSON Content-Type.
  * @return array{0: Client, 1: RequestSpy}
  */
-function fakeClient(int $status = 200, array|string $body = ['id' => 'id_1'], ?string $baseUrl = 'https://api.test'): array
-{
+function fakeClient(
+    int $status = 200,
+    array|string $body = ['id' => 'id_1'],
+    ?string $baseUrl = 'https://api.test',
+    array $headers = [],
+): array {
     $spy = new RequestSpy();
     $payload = is_string($body) ? $body : (string) json_encode($body);
+    $headers = ['Content-Type' => 'application/json', ...$headers];
 
-    $handler = function (RequestInterface $request, array $options) use ($spy, $status, $payload): PromiseInterface {
+    $handler = function (RequestInterface $request, array $options) use ($spy, $status, $payload, $headers): PromiseInterface {
         $spy->requests[] = $request;
 
-        return new FulfilledPromise(new Response($status, ['Content-Type' => 'application/json'], $payload));
+        return new FulfilledPromise(new Response($status, $headers, $payload));
     };
 
     $guzzle = new GuzzleClient(['handler' => $handler]);

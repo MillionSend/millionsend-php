@@ -14,7 +14,12 @@ use MillionSend\Util;
  */
 final class Inboxes
 {
-    private const WIRE_MAP = ['emailAddress' => 'email_address', 'fromName' => 'from_name', 'expiresIn' => 'expires_in'];
+    private const WIRE_MAP = [
+        'emailAddress' => 'email_address',
+        'domainId' => 'domain_id',
+        'fromName' => 'from_name',
+        'expiresIn' => 'expires_in',
+    ];
 
     public readonly InboxSafety $safety;
     public readonly InboxCodes $codes;
@@ -34,9 +39,15 @@ final class Inboxes
     }
 
     /**
-     * POST /inboxes — `emailAddress` (omit for a random address on the shared
-     * domain), `name`, `fromName`, `forwarding`, `kind` (`agent` or `human`),
-     * `expiresIn` (`24h`, `7d`, or null for never), `safety` (partial rules).
+     * POST /inboxes — `emailAddress` on one of your verified domains; omitted, the
+     * address is on the shared domain, `username@<team>.<shared domain>` with
+     * `username`, random without. `domainId` (a GET /domains id) replaces
+     * `emailAddress`: the `shared: true` row works like omitting it, one of your
+     * own domains needs `username`. Also `name` (1-320 characters), `fromName`,
+     * `forwarding`, `kind` (`agent` or `human`), `expiresIn` (`1h` to `365d`;
+     * omitted or null, it never expires) and `safety` (partial rules). On the
+     * shared domain a chosen `username` or `fromName` is reviewed first: a 503
+     * `name_review_unavailable` or a 429 tells when to retry in `getRetryAfter()`.
      *
      * @param array<string,mixed> $params
      * @return array<mixed>
@@ -74,7 +85,9 @@ final class Inboxes
     }
 
     /**
-     * PATCH /inboxes/:id — `name`, `fromName` (`''` removes it), `expiresIn`.
+     * PATCH /inboxes/:id — `name`, `fromName` (`''` removes it), `expiresIn` (null
+     * never expires). A new `fromName` on the shared domain is reviewed like on
+     * {@see create()}, so this can answer 503 or 429 too.
      *
      * @param array<string,mixed> $params
      * @return array<mixed>

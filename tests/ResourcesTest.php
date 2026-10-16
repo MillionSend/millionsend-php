@@ -483,7 +483,7 @@ describe('contacts (full body, batch, segments)', function () {
         $response = [
             'data' => [['object' => 'contact', 'index' => 0, 'id' => 'c1', 'status' => 'created']],
             'counts' => ['created' => 1, 'updated' => 0, 'skipped' => 0, 'failed' => 1],
-            'errors' => [['index' => 1, 'message' => 'Invalid email']],
+            'errors' => [['index' => 1, 'statusCode' => 422, 'name' => 'validation_error', 'message' => 'Invalid email']],
         ];
         [$ms, $spy] = fakeClient(200, $response);
         $res = $ms->contacts->batch->create(
@@ -924,6 +924,8 @@ const INBOX_ID = '6f1c9a1e-0000-4000-8000-0000000000a1';
 const THREAD_ID = '6f1c9a1e-0000-4000-8000-0000000000b1';
 const EMAIL_ID = '6f1c9a1e-0000-4000-8000-0000000000c1';
 const DRAFT_ID = '6f1c9a1e-0000-4000-8000-0000000000d1';
+const SHARED_DOMAIN_ID = '6f1c9a1e-0000-4000-8000-0000000000e1';
+const OWN_DOMAIN_ID = '6f1c9a1e-0000-4000-8000-0000000000e2';
 
 /** @return array<string, mixed> */
 function inboxFixture(): array
@@ -933,7 +935,7 @@ function inboxFixture(): array
         'id' => INBOX_ID,
         'name' => 'Signup bot',
         'email_address' => 'signup-bot-7f3k@acme.agents.example.com',
-        'domain_id' => '6f1c9a1e-0000-4000-8000-0000000000e1',
+        'domain_id' => SHARED_DOMAIN_ID,
         'receiving_address' => null,
         'from_name' => null,
         'unread' => 1,
@@ -942,7 +944,7 @@ function inboxFixture(): array
         'created_at' => '2026-10-12T10:00:00.000Z',
         'kind' => 'agent',
         'shared' => true,
-        'expires_at' => '2026-10-13T10:00:00.000Z',
+        'expires_at' => null,
         'quarantined' => 0,
         'pending_approval' => 0,
     ];
@@ -1033,6 +1035,19 @@ describe('emails->receiving', function () {
 
         $ms->emails->receiving->list();
         expect($spy->at(1)->getUri()->getQuery())->toBe('');
+    });
+
+    it('list sends unread without an inbox_id; an unknown inbox_id is a 404, even with wait', function () {
+        [$ms, $spy] = fakeClient(200, ['object' => 'list', 'has_more' => false, 'data' => []]);
+        $ms->emails->receiving->list(['unread' => false]);
+        expect(queryOf($spy->at(0)))->toBe(['unread' => 'false']);
+
+        [$ms] = fakeClient(404, ['statusCode' => 404, 'name' => 'not_found', 'message' => 'Inbox not found.']);
+        expect(fn () => $ms->emails->receiving->list(['inboxId' => INBOX_ID, 'wait' => 30]))
+            ->toThrow(function (MillionSend\Exceptions\ErrorException $e) {
+                expect($e->getErrorName())->toBe('not_found');
+                expect($e->getStatusCode())->toBe(404);
+            });
     });
 
     it('get passes html_format and keeps the extension fields', function () {
@@ -1149,6 +1164,19 @@ describe('inboxes', function () {
         expect((string) $spy->at(1)->getBody())->toBe('{}');
     });
 
+    it('create sends username and domainId, alone or together', function () {
+        [$ms, $spy] = fakeClient(201, inboxFixture());
+
+        $ms->inboxes->create(['username' => 'ada']);
+        expect((string) $spy->at(0)->getBody())->toBe('{"username":"ada"}');
+
+        $ms->inboxes->create(['domainId' => SHARED_DOMAIN_ID]);
+        expect(bodyOf($spy->at(1)))->toBe(['domain_id' => SHARED_DOMAIN_ID]);
+
+        $ms->inboxes->create(['domainId' => OWN_DOMAIN_ID, 'username' => 'support']);
+        expect(bodyOf($spy->at(2)))->toBe(['domain_id' => OWN_DOMAIN_ID, 'username' => 'support']);
+    });
+
     it('list, get by address, update and remove', function () {
         [$ms, $spy] = fakeClient(200, inboxFixture());
 
@@ -1202,6 +1230,9 @@ describe('inboxes', function () {
 
         $ms->inboxes->quarantine->release(INBOX_ID, EMAIL_ID);
         expect((string) $spy->at(5)->getBody())->toBe('{}');
+
+        $ms->inboxes->codes->latest(INBOX_ID, ['wait' => 30, 'since' => '2026-10-16T12:00:00.000Z']);
+        expect(queryOf($spy->at(6)))->toBe(['wait' => '30', 'since' => '2026-10-16T12:00:00.000Z']);
     });
 
     it('labels list, create, update and remove', function () {
@@ -1256,6 +1287,29 @@ describe('inboxes', function () {
             'start_date' => '2026-10-01',
             'end_date' => '2026-10-12',
         ]);
+    });
+
+    it('thread items carry quarantined only when the server sends it', function () {
+        $item = [
+            'id' => THREAD_ID,
+            'subject' => 'Invoice 42',
+            'from' => 'billing@example.com',
+            'to' => ['signup-bot-7f3k@acme.agents.example.com'],
+            'cc' => [],
+            'bcc' => [],
+            'labels' => [],
+            'message_count' => 3,
+            'has_attachment' => false,
+            'has_draft' => false,
+            'read' => false,
+            'received_at' => '2026-10-12T10:05:00.000Z',
+            'folder' => 'inbox',
+        ];
+        [$ms] = fakeClient(200, ['object' => 'list', 'has_more' => false, 'data' => [[...$item, 'quarantined' => 2], $item]]);
+
+        $data = $ms->inboxes->threads->list(INBOX_ID, ['includeQuarantined' => true])['data'];
+        expect($data[0]['quarantined'])->toBe(2);
+        expect($data[1])->not->toHaveKey('quarantined');
     });
 
     it('threads get, update and remove', function () {
@@ -1371,5 +1425,81 @@ describe('inbox fields on existing resources', function () {
 
         $ms->domains->update('d1', ['receivingCatchAll' => false]);
         expect(bodyOf($spy->at(3)))->toBe(['receiving_catch_all' => false]);
+    });
+});
+
+/**
+ * A domain row as GET /domains lists it, without `shared` (as a server before v0.14.0 sends it).
+ *
+ * @param array<string, mixed> $fields
+ * @return array<string, mixed>
+ */
+function domainFixture(array $fields = []): array
+{
+    return [
+        'id' => OWN_DOMAIN_ID,
+        'name' => 'acme.dev',
+        'status' => 'verified',
+        'created_at' => '2026-10-01T09:00:00.000Z',
+        'region' => 'us-east-1',
+        'open_tracking' => false,
+        'click_tracking' => false,
+        'tracking_subdomain' => null,
+        'capabilities' => ['sending' => 'enabled', 'receiving' => 'enabled'],
+        'receiving_catch_all' => false,
+        ...$fields,
+    ];
+}
+
+describe('domains (the shared inbox domain)', function () {
+    it('get returns the shared row whole, records: [] included', function () {
+        $shared = domainFixture([
+            'object' => 'domain',
+            'id' => SHARED_DOMAIN_ID,
+            'name' => 'acme.agents.example.com',
+            'shared' => true,
+            'sending_mode' => 'reply_only',
+            'sending_mode_reason' => 'plan',
+            'records' => [],
+        ]);
+        [$ms] = fakeClient(200, $shared);
+
+        expect($ms->domains->get(SHARED_DOMAIN_ID))->toBe($shared);
+    });
+
+    it('list: sending_mode and its reason only on the shared row; an older server sends no shared', function () {
+        $page = [
+            'object' => 'list',
+            'has_more' => false,
+            'data' => [
+                domainFixture(['shared' => false]),
+                domainFixture(['id' => SHARED_DOMAIN_ID, 'shared' => true, 'sending_mode' => 'open', 'sending_mode_reason' => null]),
+            ],
+        ];
+        [$ms] = fakeClient(200, $page);
+        [$own, $row] = $ms->domains->list()['data'];
+
+        expect($own['shared'])->toBeFalse();
+        expect($own)->not->toHaveKey('sending_mode');
+        expect($own)->not->toHaveKey('sending_mode_reason');
+        expect($row['shared'])->toBeTrue();
+        expect($row['sending_mode'])->toBe('open');
+        expect($row['sending_mode_reason'])->toBeNull();
+
+        [$ms] = fakeClient(200, ['object' => 'list', 'has_more' => false, 'data' => [domainFixture()]]);
+        expect($ms->domains->list()['data'][0]['shared'] ?? false)->toBeFalse();
+
+        [$ms] = fakeClient(200, domainFixture(['id' => SHARED_DOMAIN_ID, 'shared' => true, 'sending_mode' => 'paused_for_review']));
+        expect($ms->domains->get(SHARED_DOMAIN_ID)['sending_mode'])->toBe('paused_for_review');
+    });
+
+    it('the shared row is read-only: 403 forbidden', function () {
+        [$ms] = fakeClient(403, ['statusCode' => 403, 'name' => 'forbidden', 'message' => 'it can\'t be changed or deleted']);
+
+        expect(fn () => $ms->domains->update(SHARED_DOMAIN_ID, ['openTracking' => true]))
+            ->toThrow(function (MillionSend\Exceptions\ErrorException $e) {
+                expect($e->getErrorName())->toBe('forbidden');
+                expect($e->getStatusCode())->toBe(403);
+            });
     });
 });

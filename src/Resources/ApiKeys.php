@@ -16,8 +16,10 @@ final class ApiKeys
 
     /**
      * POST /api-keys — `permission` is full_access (default) or sending_access;
-     * `domainId` restricts a sending key to one domain; `inboxId` restricts a
-     * full_access key to one inbox (it reads that inbox and sends only from it).
+     * `domainId` restricts a sending key to one of the team's own domains (a
+     * `shared: false` row of GET /domains; the shared row's id answers 422);
+     * `inboxId` restricts a full_access key to one inbox (it reads that inbox and
+     * sends only from it).
      *
      * @param array{name: string, permission?: string, domainId?: string|null, inboxId?: string|null} $params
      * @return array<mixed>

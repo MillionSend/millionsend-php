@@ -7,7 +7,12 @@ namespace MillionSend\Resources;
 use MillionSend\HttpClient;
 use MillionSend\Util;
 
-/** Sending domains and their DNS records. */
+/**
+ * Sending domains and their DNS records. On an instance with a shared inbox
+ * domain, the team's subdomain of it is listed last with `shared: true` and its
+ * `sending_mode`; it is read-only (403 `forbidden`) and sends only from an
+ * inbox's own address, so pick sender domains among the `shared: false` rows.
+ */
 final class Domains
 {
     private const WIRE_MAP = [

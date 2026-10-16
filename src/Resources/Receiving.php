@@ -38,7 +38,9 @@ final class Receiving
     /**
      * GET /emails/receiving — newest first. Filters: `wait` (long-poll up to 50 s;
      * the answer then also carries `held`), `since`, `inboxId`, `to`, `from`,
-     * `subjectContains`, `unread`, `includeQuarantined`, `quarantined`.
+     * `subjectContains`, `unread` (with `inboxId`, unless the key is
+     * inbox-scoped), `includeQuarantined`, `quarantined`. An unknown `inboxId`
+     * answers 404 at once, even with `wait`.
      *
      * @param array<string,mixed> $options
      * @return array<mixed>

@@ -16,7 +16,8 @@ final class ContactsBatch
      * POST /contacts/batch — 1..1000 contacts as a bare JSON array. Options:
      * `onConflict`/`on_conflict` (`error`, the default, `skip` or `upsert`) and
      * `batchValidation`/`batch_validation` (`strict`, the default, or
-     * `permissive`, which reports per-item failures in `errors[]`).
+     * `permissive`, which reports per-item failures in `errors[]` as
+     * `{index, statusCode, name, message}`).
      *
      * @param list<array<string,mixed>> $params
      * @param array{onConflict?: string, on_conflict?: string, batchValidation?: string, batch_validation?: string} $options

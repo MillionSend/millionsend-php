@@ -27,7 +27,8 @@ final class InboxThreads
 
     /**
      * GET /inboxes/:id/threads — most recently active first. Filters: `folders`
-     * and `labels` (lists, sent comma-separated), `read`, `includeQuarantined`.
+     * and `labels` (lists, sent comma-separated), `read`, `includeQuarantined`
+     * (each item then also carries `quarantined`, its held messages not yet released).
      *
      * @param array<string,mixed> $options
      * @return array<mixed>

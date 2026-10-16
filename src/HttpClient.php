@@ -161,7 +161,9 @@ final class HttpClient
         $decoded = $raw === '' ? null : json_decode($raw, true);
 
         if ($status < 200 || $status >= 300) {
-            throw ErrorException::fromBody($decoded, $status);
+            $retryAfter = filter_var($response->getHeaderLine('retry-after'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+
+            throw ErrorException::fromBody($decoded, $status, $retryAfter === false ? null : $retryAfter);
         }
 
         return [$status, is_array($decoded) ? $decoded : []];

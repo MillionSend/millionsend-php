@@ -16,7 +16,9 @@ final class Batch
      * Options: `idempotencyKey`/`idempotency_key` (Idempotency-Key header) and
      * `batchValidation`/`batch_validation` (`strict`, the server default, fails
      * the whole batch on one invalid item; `permissive` sends the valid ones and
-     * reports the rest in the response's `errors[]`).
+     * reports the rest in the response's `errors[]`). An item never sends from
+     * the shared domain (403 `inbox_send_policy`). A retry with the same
+     * Idempotency-Key gets the stored response.
      *
      * @param list<array<string,mixed>> $params
      * @param array{idempotencyKey?: string, idempotency_key?: string, batchValidation?: string, batch_validation?: string} $options

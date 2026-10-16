@@ -21,7 +21,8 @@ final class Broadcasts
 
     /**
      * POST /broadcasts. Pass `send => true` (optionally with `scheduledAt`) to
-     * create and send in one call.
+     * create and send in one call. Broadcasts never send from the shared domain
+     * (403 `inbox_send_policy`).
      *
      * @param array<string,mixed> $params
      * @return array<mixed>

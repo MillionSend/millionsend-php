@@ -200,7 +200,40 @@ describe('request wiring', function () {
             expect($e->getStatusCode())->toBeNull();
             expect($e->getErrorName())->toBe('application_error');
             expect($e->getMessage())->toContain('ECONNREFUSED');
+            expect($e->getRetryAfter())->toBeNull();
         }
+    });
+
+    it('reads retry-after in seconds, null without the header', function () {
+        $body = ['statusCode' => 503, 'name' => 'name_review_unavailable', 'message' => 'try again later'];
+        [$ms] = fakeClient(503, $body, headers: ['retry-after' => '300']);
+
+        expect(fn () => $ms->inboxes->create(['username' => 'acme-support']))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('name_review_unavailable');
+                expect($e->getStatusCode())->toBe(503);
+                expect($e->getRetryAfter())->toBe(300);
+            });
+
+        [$ms] = fakeClient(503, $body);
+        expect(fn () => $ms->inboxes->create(['username' => 'acme-support']))
+            ->toThrow(fn (ErrorException $e) => expect($e->getRetryAfter())->toBeNull());
+    });
+
+    it('a JSON 404 for an unknown route is not_found; an older server\'s plain-text 404 is application_error', function () {
+        [$ms] = fakeClient(404, ['statusCode' => 404, 'name' => 'not_found', 'message' => 'The requested endpoint does not exist.']);
+        expect(fn () => $ms->http->request('GET', '/no-such-route'))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('not_found');
+                expect($e->getStatusCode())->toBe(404);
+            });
+
+        [$ms] = fakeClient(404, '404 Not Found', headers: ['Content-Type' => 'text/plain']);
+        expect(fn () => $ms->http->request('GET', '/no-such-route'))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('application_error');
+                expect($e->getStatusCode())->toBe(404);
+            });
     });
 
     it('never sends a path an empty, "." or ".." id would turn into another resource\'s', function () {

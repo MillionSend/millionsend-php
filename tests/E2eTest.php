@@ -19,7 +19,7 @@ $skip = fn (): bool => getenv('MILLIONSEND_API_KEY') === false;
 
 it('creates, reads, updates and deletes a contact', function () {
     $ms = MillionSend::client();
-    $email = 'sdk-e2e-' . uniqid() . '@example.com';
+    $email = 'success+sdk-e2e-' . uniqid() . '@simulator.amazonses.com';
 
     $created = $ms->contacts->create(['email' => $email, 'firstName' => 'Ada']);
     expect($created['id'])->not->toBeEmpty();
