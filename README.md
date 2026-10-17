@@ -86,6 +86,10 @@ the same exception with `getStatusCode()` returning `null`.
 
 `emails->send()` and `batch->send()` throw a 422 `all_recipients_suppressed` when every
 `to` recipient is on the suppression list or has opted out of the send's `topic_id`.
+An `emails->send()` that the suppression list alone refuses still keeps a metadata-only
+`suppressed` email, which fires `email.suppressed`, and each retry keeps another, even
+with the same `idempotency_key` (a refused send doesn't hold its key); servers before
+v0.15.1 keep nothing.
 
 Inboxes add `inbox_send_policy` (403, a send the inbox's rules or the shared domain refuse; one they hold is a 202 draft),
 `inbox_send_cap_reached` (429, the inbox's daily cap, or the team's on the shared domain), `approval_required` (403),
@@ -594,7 +598,8 @@ $rotated['previous_secret_expires_at'];  // ISO timestamp while the old secret s
 During the overlap every delivery carries both signatures (new first, then previous,
 space-separated in `webhook-signature`), so a receiver holding either verifies.
 
-Subscribable `events` include `email.*` (with `email.received`) plus the contact and
+Subscribable `events` include `email.*` (with `email.scheduled`, `email.failed`,
+`email.suppressed`, `email.prefetched` and `email.received`) plus the contact and
 suppression events: `contact.created`, `contact.updated`, `contact.deleted`,
 `contact.unsubscribed`, `contact.resubscribed`, `contact.topic_opt_in`,
 `contact.topic_opt_out`, `suppression.added`, `suppression.removed`; and the `inbox.*`
@@ -602,10 +607,18 @@ events: `inbox.created`, `inbox.updated`, `inbox.deleted`, `inbox.expired`,
 `inbox.thread.created`, `inbox.thread.folder.updated`, `inbox.thread.labels.updated`,
 `inbox.email.received`, `inbox.email.sent`, `inbox.email.quarantined`,
 `inbox.draft.created`, `inbox.draft.updated`, `inbox.draft.sent`, `inbox.draft.deleted`.
-Inbox events reach only endpoints that list them by name. `inbox_ids` limits an
-endpoint's inbox events and `email.received` to those inboxes (`null` = every inbox).
-Their `data.source` says who acted: `api`, `dashboard` or `system`. A shared-domain
-inbox deleted after 90 unused days fires `inbox.expired`, then `inbox.deleted`.
+`email.prefetched` and inbox events reach only endpoints that list them by name.
+`inbox_ids` limits an endpoint's inbox events and `email.received` to those inboxes
+(`null` = every inbox). Inbox events' `data.source` says who acted: `api`,
+`dashboard` or `system`. A shared-domain inbox deleted after 90 unused days fires
+`inbox.expired`, then `inbox.deleted`.
+
+`email.failed` says why in `data.failed.reason`, and `email.suppressed` in
+`data.suppressed` (`type`, `message` and `reason`); new values can appear, so don't
+treat them as a closed list. `suppression.added` and `suppression.removed` carry
+`data.source_id`, the email whose bounce or complaint created the entry (`null`
+otherwise). Servers before v0.15.1 answer 422 `validation_error` to a webhook that
+names `email.scheduled`, `email.failed` or `email.suppressed`.
 
 ### API keys
 
