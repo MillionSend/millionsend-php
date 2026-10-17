@@ -609,9 +609,9 @@ events: `inbox.created`, `inbox.updated`, `inbox.deleted`, `inbox.expired`,
 `inbox.draft.created`, `inbox.draft.updated`, `inbox.draft.sent`, `inbox.draft.deleted`.
 `email.prefetched` and inbox events reach only endpoints that list them by name.
 `inbox_ids` limits an endpoint's inbox events and `email.received` to those inboxes
-(`null` = every inbox). Their `data.source` says who acted: `api`, `dashboard` or
-`system`. A shared-domain inbox deleted after 90 unused days fires `inbox.expired`,
-then `inbox.deleted`.
+(`null` = every inbox). Inbox events' `data.source` says who acted: `api`,
+`dashboard` or `system`. A shared-domain inbox deleted after 90 unused days fires
+`inbox.expired`, then `inbox.deleted`.
 
 `email.failed` says why in `data.failed.reason`, and `email.suppressed` in
 `data.suppressed` (`type`, `message` and `reason`); new values can appear, so don't
