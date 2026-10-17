@@ -96,6 +96,9 @@ Inboxes add `inbox_send_policy` (403, a send the inbox's rules or the shared dom
 `email_quarantined` (403), `email_blocked` (410, a download of an email that carries
 malware), `too_many_waits` (429, too many concurrent long-polls) and
 `name_review_unavailable` (503, a name on the shared domain can't be reviewed right now; see [the shared domain](#the-shared-domain)).
+A quarantine release adds `trust_not_allowed` (403) and `held_by_screening` (409), see
+[Inboxes](#inboxes); it answers `forbidden` (403) and `screening_unavailable` (503) only to
+MCP clients.
 
 An unknown route answers 404 `not_found`. Servers before v0.13.0 answer it in plain text,
 which surfaces as `application_error` with status 404.
@@ -292,7 +295,7 @@ $ms->inboxes->safety->update($inbox['id'], ['accept_from' => 'allowlist', 'allow
 
 // Quarantine: held mail, kept until a person releases it
 $ms->inboxes->quarantine->list($inbox['id']);
-$ms->inboxes->quarantine->release($inbox['id'], $emailId, ['trust_sender' => true]);
+$ms->inboxes->quarantine->release($inbox['id'], $emailId);
 
 // Threads and their messages
 $ms->inboxes->threads->list($inbox['id'], ['folders' => ['inbox', 'archive'], 'read' => false]);
@@ -330,6 +333,14 @@ full-access team key approves it. camelCase spellings (`inboxId`, `replyAll`,
 `requiresApproval`, `expiresIn`, `acceptFrom`, `trustSender`, `labelId`, `threadId`,
 `replyToEmailId`, `domainId`, …) are renamed like everywhere else. Hosted agent settings
 (`/inboxes/:id/agent`) are not exposed: MillionSend runs no agent of its own.
+
+On an agent inbox with `screening` on, mail held before screening ran (`not_allowlisted`,
+`unauthenticated_sender`, `failed_auth`) is screened at release when screening can run: if
+it finds prompt injection or phishing, the email stays held as `injection` or `phishing`
+(409 `held_by_screening`). `'trust_sender' => true` also adds the sender to the allowlist,
+only for mail held as `not_allowlisted` from a sender that authenticated (`sender_trust`
+`external`); anything else answers 403 `trust_not_allowed`. Servers before v0.16.0 apply
+neither rule.
 
 `inboxes->create()` takes no Idempotency-Key. After a 503 or 429 nothing was created, so
 sending it again is safe; after a timeout a retry may create a second inbox, and with a
