@@ -7,7 +7,14 @@ namespace MillionSend\Resources;
 use MillionSend\HttpClient;
 use MillionSend\Util;
 
-/** Custom contact property definitions (typed `string` or `number`). */
+/**
+ * Custom contact property definitions, typed `string`, `number` or `date`
+ * (`date` is a MillionSend extension). A date property's values and
+ * `fallbackValue` must read as a date, or the write gets 422 `validation_error`:
+ * `YYYY-MM-DD` (midnight UTC), a date-time with `T` or a space (UTC when it
+ * names no zone), or Unix time in seconds or milliseconds between 2000-01-01
+ * and 2100-01-01.
+ */
 final class ContactProperties
 {
     private const WIRE_MAP = ['fallbackValue' => 'fallback_value'];
