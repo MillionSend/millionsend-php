@@ -15,7 +15,7 @@ use MillionSend\Exceptions\ErrorException;
  */
 final class HttpClient
 {
-    public const VERSION = '0.9.0';
+    public const VERSION = '0.9.1';
 
     /** Seconds a long-poll answer may take to arrive after the server's own `wait` deadline. */
     private const LONG_POLL_MARGIN = 10.0;

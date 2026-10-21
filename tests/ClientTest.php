@@ -334,6 +334,6 @@ describe('wire body completeness', function () {
         [$ms, $spy] = fakeClient();
         $ms->emails->get('e1');
 
-        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.9.0');
+        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.9.1');
     });
 });
