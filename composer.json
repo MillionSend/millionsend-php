@@ -5,23 +5,30 @@
     "keywords": ["email", "millionsend", "ses", "transactional-email", "resend-compatible"],
     "license": "MIT",
     "homepage": "https://github.com/MillionSend/millionsend-php",
-    "version": "0.2.0",
+    "version": "0.9.0",
     "support": {
         "issues": "https://github.com/MillionSend/millionsend-php/issues",
         "source": "https://github.com/MillionSend/millionsend-php"
     },
     "require": {
         "php": "^8.1",
-        "guzzlehttp/guzzle": "^7.5"
+        "guzzlehttp/guzzle": "^7.5 || ^8.0"
     },
     "require-dev": {
-        "pestphp/pest": "^2.34 || ^5.0"
+        "laravel/pint": "1.30.4",
+        "pestphp/pest": "^2.34 || ^5.0",
+        "phpstan/phpstan": "2.3.1"
     },
     "autoload": {
         "psr-4": { "MillionSend\\": "src/" }
     },
     "scripts": {
-        "test": "pest"
+        "test": "pest",
+        "lint": [
+            "pint --test",
+            "phpstan analyse"
+        ],
+        "lint:fix": "pint"
     },
     "config": {
         "allow-plugins": { "pestphp/pest-plugin": true },

@@ -32,6 +32,54 @@ describe('construction', function () {
             ->toThrow(InvalidArgumentException::class);
     });
 
+    it('refuses a non-loopback http base URL unless allowInsecureHttp is set', function () {
+        expect(fn () => MillionSend::client('ms_test', 'http://mail.example.com'))
+            ->toThrow(InvalidArgumentException::class, 'allowInsecureHttp');
+
+        $prev = getenv('MILLIONSEND_BASE_URL');
+        putenv('MILLIONSEND_BASE_URL=http://mail.example.com');
+        try {
+            expect(fn () => MillionSend::client('ms_test'))->toThrow(InvalidArgumentException::class);
+        } finally {
+            putenv($prev === false ? 'MILLIONSEND_BASE_URL' : 'MILLIONSEND_BASE_URL=' . $prev);
+        }
+
+        expect(MillionSend::client('ms_test', 'http://mail.example.com', ['allowInsecureHttp' => true]))
+            ->toBeInstanceOf(Client::class);
+        expect(MillionSend::client('ms_test', 'http://localhost:3001'))->toBeInstanceOf(Client::class);
+        expect(MillionSend::client('ms_test', 'http://127.0.0.1:3001'))->toBeInstanceOf(Client::class);
+    });
+
+    it('keeps the API key out of debug output', function () {
+        $ms = MillionSend::client('ms_secret_key', 'https://api.test');
+
+        expect(print_r($ms, true))->not->toContain('ms_secret_key');
+        ob_start();
+        var_dump($ms);
+        expect((string) ob_get_clean())->not->toContain('ms_secret_key');
+    });
+
+    it('defaults the base URL to MillionSend Cloud; the env var and the explicit argument win', function () {
+        $prev = getenv('MILLIONSEND_BASE_URL');
+        putenv('MILLIONSEND_BASE_URL');
+        try {
+            [$ms, $spy] = fakeClient(200, ['id' => 'e1'], null);
+            $ms->emails->get('e1');
+            expect((string) $spy->last()->getUri())->toBe('https://api.millionsend.com/emails/e1');
+
+            putenv('MILLIONSEND_BASE_URL=https://env.test');
+            [$ms, $spy] = fakeClient(200, ['id' => 'e1'], null);
+            $ms->emails->get('e1');
+            expect((string) $spy->last()->getUri())->toBe('https://env.test/emails/e1');
+
+            [$ms, $spy] = fakeClient(200, ['id' => 'e1'], 'https://explicit.test');
+            $ms->emails->get('e1');
+            expect((string) $spy->last()->getUri())->toBe('https://explicit.test/emails/e1');
+        } finally {
+            putenv($prev === false ? 'MILLIONSEND_BASE_URL' : 'MILLIONSEND_BASE_URL=' . $prev);
+        }
+    });
+
     it('strips a trailing slash from the base URL', function () {
         [$ms, $spy] = fakeClient(200, ['id' => 'e1'], 'https://api.test/');
         $ms->emails->get('e1');
@@ -41,6 +89,19 @@ describe('construction', function () {
 });
 
 describe('request wiring', function () {
+    it('exposes the transport for endpoints the SDK does not wrap', function () {
+        [$ms, $spy] = fakeClient(200, ['ok' => true]);
+
+        expect($ms->http->request('POST', '/future/thing', ['a' => 1], ['q' => 'x'], 'idem-1'))->toBe(['ok' => true]);
+        $req = $spy->last();
+        expect($req->getMethod())->toBe('POST');
+        expect($req->getUri()->getPath())->toBe('/future/thing');
+        expect($req->getUri()->getQuery())->toBe('q=x');
+        expect(bodyOf($req))->toBe(['a' => 1]);
+        expect($req->getHeaderLine('Authorization'))->toBe('Bearer ms_test');
+        expect($req->getHeaderLine('Idempotency-Key'))->toBe('idem-1');
+    });
+
     it('sets Bearer auth, Accept, User-Agent and Content-Type on writes', function () {
         [$ms, $spy] = fakeClient();
         $ms->emails->send(['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => 's', 'html' => '<p>h</p>']);
@@ -90,6 +151,25 @@ describe('request wiring', function () {
         expect($spy->last()->getHeaderLine('Idempotency-Key'))->toBe('');
     });
 
+    it('stretches the deadline past a long-poll wait', function () {
+        $timeouts = [];
+        $handler = function (Psr\Http\Message\RequestInterface $request, array $options) use (&$timeouts): GuzzleHttp\Promise\PromiseInterface {
+            $timeouts[] = $options['timeout'];
+
+            return new GuzzleHttp\Promise\FulfilledPromise(new GuzzleHttp\Psr7\Response(200, [], '{}'));
+        };
+        $ms = MillionSend::client('ms_test', 'https://api.test', [
+            'client' => new GuzzleHttp\Client(['handler' => $handler]),
+            'timeout' => 5.0,
+        ]);
+
+        $ms->emails->receiving->list();
+        $ms->emails->receiving->list(['wait' => 45]);
+        $ms->inboxes->codes->latest('ib1', ['wait' => 1]);
+
+        expect($timeouts)->toBe([5.0, 55.0, 11.0]);
+    });
+
     it('returns the decoded body on 2xx', function () {
         [$ms] = fakeClient(200, ['id' => 'abc']);
         $res = $ms->emails->send(['from' => 'a@x.dev', 'to' => 'b@x.dev', 'subject' => 's', 'text' => 't']);
@@ -120,7 +200,53 @@ describe('request wiring', function () {
             expect($e->getStatusCode())->toBeNull();
             expect($e->getErrorName())->toBe('application_error');
             expect($e->getMessage())->toContain('ECONNREFUSED');
+            expect($e->getRetryAfter())->toBeNull();
         }
+    });
+
+    it('reads retry-after in seconds, null without the header', function () {
+        $body = ['statusCode' => 503, 'name' => 'name_review_unavailable', 'message' => 'try again later'];
+        [$ms] = fakeClient(503, $body, headers: ['retry-after' => '300']);
+
+        expect(fn () => $ms->inboxes->create(['username' => 'acme-support']))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('name_review_unavailable');
+                expect($e->getStatusCode())->toBe(503);
+                expect($e->getRetryAfter())->toBe(300);
+            });
+
+        [$ms] = fakeClient(503, $body);
+        expect(fn () => $ms->inboxes->create(['username' => 'acme-support']))
+            ->toThrow(fn (ErrorException $e) => expect($e->getRetryAfter())->toBeNull());
+    });
+
+    it('a JSON 404 for an unknown route is not_found; an older server\'s plain-text 404 is application_error', function () {
+        [$ms] = fakeClient(404, ['statusCode' => 404, 'name' => 'not_found', 'message' => 'The requested endpoint does not exist.']);
+        expect(fn () => $ms->http->request('GET', '/no-such-route'))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('not_found');
+                expect($e->getStatusCode())->toBe(404);
+            });
+
+        [$ms] = fakeClient(404, '404 Not Found', headers: ['Content-Type' => 'text/plain']);
+        expect(fn () => $ms->http->request('GET', '/no-such-route'))
+            ->toThrow(function (ErrorException $e) {
+                expect($e->getErrorName())->toBe('application_error');
+                expect($e->getStatusCode())->toBe(404);
+            });
+    });
+
+    it('never sends a path an empty, "." or ".." id would turn into another resource\'s', function () {
+        [$ms, $spy] = fakeClient();
+
+        expect(fn () => $ms->inboxes->labels->remove('inbox_1', '..'))
+            ->toThrow(InvalidArgumentException::class, 'empty, "." or ".."');
+        expect(fn () => $ms->inboxes->threads->remove('inbox_1', '.'))->toThrow(InvalidArgumentException::class);
+        expect(fn () => $ms->emails->get(''))->toThrow(InvalidArgumentException::class);
+        expect($spy->requests)->toBe([]);
+
+        $ms->inboxes->labels->remove('inbox_1', '...');
+        expect($spy->last()->getUri()->getPath())->toBe('/inboxes/inbox_1/labels/...');
     });
 
     it('falls back to a generic error when the body is not the canonical shape', function () {
@@ -134,5 +260,80 @@ describe('request wiring', function () {
             expect($e->getMessage())->toBe('Request failed with status 500');
             expect($e->getStatusCode())->toBe(500);
         }
+    });
+});
+
+describe('wire body completeness', function () {
+    it('puts every send field on the wire, renaming only the camelCase aliases', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->emails->send([
+            'from' => 'Acme <a@x.dev>',
+            'to' => ['b@x.dev'],
+            'subject' => 's',
+            'html' => '<p>h</p>',
+            'text' => 'h',
+            'cc' => ['c@x.dev'],
+            'bcc' => 'd@x.dev',
+            'replyTo' => ['r@x.dev'],
+            'scheduledAt' => '2999-01-01T00:00:00Z',
+            'tags' => [['name' => 'category', 'value' => 'launch']],
+            'topicId' => '0f2f6b1e-6b2e-4d7a-9a1e-1a2b3c4d5e6f',
+            'attachments' => [[
+                'filename' => 'a.txt',
+                'content' => base64_encode('hello'),
+                'content_type' => 'text/plain',
+                'content_id' => 'cid1',
+                'path' => 'https://x.dev/a.txt',
+            ]],
+            'headers' => ['X-Entity-Ref-ID' => '123'],
+            'template' => ['id' => 'tmpl_1', 'variables' => ['name' => 'Ada']],
+        ]);
+
+        expect(bodyOf($spy->last()))->toBe([
+            'from' => 'Acme <a@x.dev>',
+            'to' => ['b@x.dev'],
+            'subject' => 's',
+            'html' => '<p>h</p>',
+            'text' => 'h',
+            'cc' => ['c@x.dev'],
+            'bcc' => 'd@x.dev',
+            'reply_to' => ['r@x.dev'],
+            'scheduled_at' => '2999-01-01T00:00:00Z',
+            'tags' => [['name' => 'category', 'value' => 'launch']],
+            'topic_id' => '0f2f6b1e-6b2e-4d7a-9a1e-1a2b3c4d5e6f',
+            'attachments' => [[
+                'filename' => 'a.txt',
+                'content' => base64_encode('hello'),
+                'content_type' => 'text/plain',
+                'content_id' => 'cid1',
+                'path' => 'https://x.dev/a.txt',
+            ]],
+            'headers' => ['X-Entity-Ref-ID' => '123'],
+            'template' => ['id' => 'tmpl_1', 'variables' => ['name' => 'Ada']],
+        ]);
+    });
+
+    it('passes a verbatim resend-php snake_case payload through unchanged', function () {
+        [$ms, $spy] = fakeClient();
+        $payload = [
+            'from' => 'a@x.dev',
+            'to' => 'b@x.dev',
+            'subject' => 's',
+            'text' => 't',
+            'reply_to' => 'r@x.dev',
+            'scheduled_at' => 'in 1 hour',
+            'topic_id' => null,
+        ];
+        $ms->emails->send($payload, ['idempotency_key' => 'resend-shape']);
+
+        expect(bodyOf($spy->last()))->toBe($payload);
+        expect($spy->last()->getHeaderLine('Idempotency-Key'))->toBe('resend-shape');
+    });
+
+    it('sends the User-Agent with the current version', function () {
+        [$ms, $spy] = fakeClient();
+        $ms->emails->get('e1');
+
+        expect($spy->last()->getHeaderLine('User-Agent'))->toBe('millionsend-php/0.9.0');
     });
 });

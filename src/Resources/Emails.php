@@ -9,27 +9,33 @@ use MillionSend\Util;
 
 final class Emails
 {
-    /** Send-payload camelCase => wire snake_case. Shared with {@see Batch}. */
+    /**
+     * Send-payload camelCase aliases => wire snake_case. Every other key
+     * (tags, attachments, headers, template, …) passes through untouched, so a
+     * verbatim resend-php payload works. Shared with {@see Batch}.
+     */
     public const WIRE_MAP = [
-        'from' => 'from',
-        'to' => 'to',
-        'subject' => 'subject',
-        'html' => 'html',
-        'text' => 'text',
-        'cc' => 'cc',
-        'bcc' => 'bcc',
         'replyTo' => 'reply_to',
         'scheduledAt' => 'scheduled_at',
-        'tags' => 'tags',
+        'topicId' => 'topic_id',
     ];
 
-    public function __construct(private readonly HttpClient $http) {}
+    public readonly Receiving $receiving;
+
+    public function __construct(private readonly HttpClient $http)
+    {
+        $this->receiving = new Receiving($http);
+    }
 
     /**
-     * POST /emails — supports an Idempotency-Key via $options['idempotencyKey'].
+     * POST /emails. Options: `idempotencyKey` (or resend-php's `idempotency_key`).
+     * `from` may be an inbox's address on the shared domain while that domain's
+     * `sending_mode` is `open`: exactly the inbox's `email_address`, a display
+     * name left out or equal to its `from_name`, at most 10 recipients, and no
+     * `reply_to`, `attachments`, `headers` or `scheduled_at`.
      *
      * @param array<string,mixed> $params
-     * @param array{idempotencyKey?: string} $options
+     * @param array{idempotencyKey?: string, idempotency_key?: string} $options
      * @return array<mixed>
      */
     public function send(array $params, array $options = []): array
@@ -37,9 +43,10 @@ final class Emails
         return $this->http->request(
             'POST',
             '/emails',
-            Util::pick($params, self::WIRE_MAP) ?: new \stdClass(),
+            Util::body($params, self::WIRE_MAP),
             [],
-            $options['idempotencyKey'] ?? null,
+            null,
+            Util::optionHeaders($options),
         );
     }
 
@@ -47,7 +54,7 @@ final class Emails
      * Alias of {@see send()}, mirroring Resend.
      *
      * @param array<string,mixed> $params
-     * @param array{idempotencyKey?: string} $options
+     * @param array{idempotencyKey?: string, idempotency_key?: string} $options
      * @return array<mixed>
      */
     public function create(array $params, array $options = []): array
@@ -61,9 +68,54 @@ final class Emails
         return $this->http->request('GET', '/emails/' . rawurlencode($id));
     }
 
-    /** POST /emails/:id/cancel — only scheduled, unsent emails. @return array<mixed> */
+    /**
+     * @param array{limit?: int, after?: string, before?: string} $options
+     * @return array<mixed>
+     */
+    public function list(array $options = []): array
+    {
+        return $this->http->request('GET', '/emails', null, Util::listQuery($options));
+    }
+
+    /**
+     * PATCH /emails/:id — reschedule a scheduled, unsent email.
+     *
+     * @param array{scheduledAt?: string, scheduled_at?: string} $params
+     * @return array<mixed>
+     */
+    public function update(string $id, array $params): array
+    {
+        return $this->http->request('PATCH', '/emails/' . rawurlencode($id), Util::body($params, self::WIRE_MAP));
+    }
+
+    /**
+     * GET /emails/:id/insights — the pre-send best-practice report. 404 when
+     * the email is unknown or has no insights yet.
+     *
+     * @return array<mixed>
+     */
+    public function getInsights(string $id): array
+    {
+        return $this->http->request('GET', '/emails/' . rawurlencode($id) . '/insights');
+    }
+
+    /**
+     * POST /emails/:id/cancel — only scheduled, unsent emails.
+     *
+     * @return array<mixed>
+     */
     public function cancel(string $id): array
     {
         return $this->http->request('POST', '/emails/' . rawurlencode($id) . '/cancel');
+    }
+
+    /**
+     * DELETE /emails/:id (MillionSend extension).
+     *
+     * @return array<mixed>
+     */
+    public function remove(string $id): array
+    {
+        return $this->http->request('DELETE', '/emails/' . rawurlencode($id));
     }
 }

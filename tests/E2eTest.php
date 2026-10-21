@@ -7,9 +7,10 @@ use MillionSend\MillionSend;
 
 /**
  * End-to-end smoke test against a real MillionSend instance. Opt-in: set
- * MILLIONSEND_API_KEY (a full-access key) and, if not localhost:3001,
- * MILLIONSEND_BASE_URL. It exercises the contact lifecycle, which needs no
- * verified domain. Skipped entirely when the key is absent.
+ * MILLIONSEND_API_KEY (a full-access key) and, for a self-hosted instance,
+ * MILLIONSEND_BASE_URL (the default is MillionSend Cloud). It exercises the
+ * contact lifecycle, which needs no verified domain. Skipped entirely when the
+ * key is absent.
  *
  *   MILLIONSEND_API_KEY=ms_... MILLIONSEND_BASE_URL=http://localhost:3001 \
  *     ./vendor/bin/pest --group=e2e
@@ -18,7 +19,7 @@ $skip = fn (): bool => getenv('MILLIONSEND_API_KEY') === false;
 
 it('creates, reads, updates and deletes a contact', function () {
     $ms = MillionSend::client();
-    $email = 'sdk-e2e-' . uniqid() . '@example.com';
+    $email = 'success+sdk-e2e-' . uniqid() . '@simulator.amazonses.com';
 
     $created = $ms->contacts->create(['email' => $email, 'firstName' => 'Ada']);
     expect($created['id'])->not->toBeEmpty();
