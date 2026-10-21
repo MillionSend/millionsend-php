@@ -13,7 +13,7 @@ point the base URL at it).
 composer require millionsend/millionsend-php
 ```
 
-Requires PHP 8.1+.
+Requires PHP 8.1+ and Guzzle 7.5+ or 8.
 
 ## Quickstart
 
