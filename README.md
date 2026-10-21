@@ -462,8 +462,17 @@ $ms->contacts->batch->remove(['emails' => [...], 'erase' => true]);   // also sc
 
 ### Contact properties
 
+A property is typed `string`, `number` or `date` (`date` is a MillionSend extension).
+A date property's values and its `fallback_value` must read as a date, or the write
+answers 422 `validation_error`: `YYYY-MM-DD` (midnight UTC), a date-time with `T` or a
+space (UTC when it names no zone), or Unix time in seconds or milliseconds between
+2000-01-01 and 2100-01-01. `contacts->get()` returns each property as
+`['type' => …, 'value' => …]`, and a date's `value` is the stored text. Servers before
+v0.22.0 refuse `date`.
+
 ```php
 $ms->contactProperties->create(['key' => 'plan', 'type' => 'string', 'fallback_value' => 'free']);
+$ms->contactProperties->create(['key' => 'last_login', 'type' => 'date']);
 $ms->contactProperties->list();
 $ms->contactProperties->get($id);
 $ms->contactProperties->update($id, ['fallback_value' => null]);   // only the fallback is mutable
@@ -529,6 +538,12 @@ $ms->segments->list();
 $ms->segments->update($id, ['name' => 'Pro tier']);
 $ms->segments->remove($id);
 ```
+
+`created_at` and `property:<key>` also take four date ops: `before` and `after` take an
+ISO date or date-time, and `in_last_days` and `not_in_last_days` take a whole number of
+days as a string, `'1'` to `'36500'`:
+`['field' => 'property:last_login', 'op' => 'not_in_last_days', 'value' => '90']`. Servers
+before v0.22.0 take only `before` and `after`, and only on `created_at`.
 
 ### Suppressions
 
@@ -709,7 +724,8 @@ match `resend-php`; snake_case payloads pass through to the wire untouched. Note
   and the local `verify()` helper, `->domains->claims`, `->broadcasts->recipients()`
   /`->clickedLinks`, `->apiKeys->update()`, and the `->events`/`->logs`/`->automations`
   services. Domain `tls` passes through and is answered with 422.
-- **MillionSend extensions** (no Resend counterpart): segment `filter`,
+- **MillionSend extensions** (no Resend counterpart): segment `filter`, the `date`
+  contact property type,
   `->contacts->batch`, `->contacts->preferencesLink()`, `->webhooks->rotate()`,
   `->emails->getInsights()`, `->emails->remove()`,
   `->deliverability`, `->usage`, `->emails->receiving->reply()` / `->forward()` /
